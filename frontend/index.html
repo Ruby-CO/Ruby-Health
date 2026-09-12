@@ -730,7 +730,6 @@
             <div style="display:flex; gap:8px;">
               <button id="uploadContextBtn" class="btn" type="button">Upload a file</button>
               <button id="cleanupBtn" class="btn" type="button">Clean up wording</button>
-              <button id="extractBtn" class="btn btn-primary" type="button">Extract clinical facts</button>
             </div>
             <input id="uploadContextInput" type="file" accept=".txt,.md,.markdown,.csv,text/*" hidden />
           </div>
@@ -3008,7 +3007,10 @@
     const cleanupStatusEl = document.getElementById("cleanupStatus");
     const transcriptSummaryBoxEl = document.getElementById("transcriptSummaryBox");
     const transcriptSummaryTextEl = document.getElementById("transcriptSummaryText");
-    const extractBtn = document.getElementById("extractBtn");
+    // The Extract button is gone: extraction is the Facts step, and it ran from
+    // the Context tab, which is what let a provider sit on Facts wondering why
+    // nothing had happened. Walking into Facts runs it. runExtract still
+    // reports here, because Prepare claim reads this line for its error text.
     const extractStatusEl = document.getElementById("extractStatus");
     const micBtn = document.getElementById("micBtn");
     const micLabelEl = document.getElementById("micLabel");
@@ -3082,23 +3084,59 @@
     // provider edited by hand -- and spend another model call to do it -- so a
     // step with something already in it is simply shown. The button on each
     // tab is how you deliberately re-run one.
+    // Asking "does this step have anything in it" is not the same as asking
+    // "was what it has derived from what is in front of it now". A step filled
+    // from an earlier context is worse than an empty one: it shows facts that
+    // belong to a transcript the provider has since replaced, and the guard
+    // that was only checking for emptiness would skip the re-run and leave
+    // them there.
+    //
+    // So each stage records a fingerprint of the input it was built from, and
+    // a stage whose input has changed is stale rather than done. That is also
+    // what makes the cascade work: edit the context and facts re-derive;
+    // entering codes then sees the facts changed and re-derives too.
+    function fingerprint(value) {
+      const text = typeof value === "string" ? value : JSON.stringify(value ?? null);
+      let h = 0;
+      for (let i = 0; i < text.length; i++) h = (Math.imul(31, h) + text.charCodeAt(i)) | 0;
+      return `${text.length}:${h}`;
+    }
+
+    const STAGE_INPUT = {
+      facts: () => fingerprint(state.transcript.trim()),
+      codes: () => fingerprint(state.facts),
+      claim: () => fingerprint({ facts: state.facts, codes: state.codes }),
+    };
+
+    function markDerived(stage) {
+      state.derivedFrom = state.derivedFrom || {};
+      state.derivedFrom[stage] = STAGE_INPUT[stage]();
+    }
+
+    function isCurrent(stage, hasContent) {
+      return hasContent && state.derivedFrom?.[stage] === STAGE_INPUT[stage]();
+    }
+
     const STAGE_ON_ENTRY = {
       facts: {
         working: "Extracting clinical facts from the context...",
+        restating: "The context changed -- re-extracting the clinical facts...",
         ready: () => state.transcript.trim().length > 0,
-        filled: hasFacts,
+        current: () => isCurrent("facts", hasFacts()),
         run: () => runExtract(),
       },
       codes: {
         working: "Suggesting codes from the clinical facts...",
+        restating: "The facts changed -- suggesting codes again...",
         ready: hasFacts,
-        filled: () => state.codes.length > 0,
+        current: () => isCurrent("codes", state.codes.length > 0),
         run: () => runSuggestCodes(),
       },
       claim: {
         working: "Building the claim from the facts and codes...",
+        restating: "The facts or codes changed -- rebuilding the claim...",
         ready: () => hasFacts() && state.codes.length > 0,
-        filled: () => Boolean(state.claim),
+        current: () => isCurrent("claim", Boolean(state.claim)),
         run: () => runPopulateClaim(),
       },
     };
@@ -3124,14 +3162,33 @@
       panels[tab].querySelector("[data-stage-note]")?.remove();
 
       const stage = STAGE_ON_ENTRY[tab];
-      // Nothing to run, already run, or the step before it has not been done --
-      // in which case the tab's own empty state already says what is missing.
-      if (!stage || stage.filled() || !stage.ready()) return;
+      // Nothing to run, already current, or the step before it has not been
+      // done -- in which case the tab's own empty state says what is missing.
+      if (!stage || stage.current() || !stage.ready()) return;
 
-      const note = stageNote(tab, stage.working, false);
+      // Say which of the two it is: filling an empty step, or replacing one
+      // whose input has moved on.
+      const stale = stage.ready() && !stage.current() && state.derivedFrom?.[tab];
+      const note = stageNote(tab, stale ? stage.restating : stage.working, false);
       const ok = await stage.run();
-      if (ok) note.remove();
-      else stageNote(tab, "That step didn't finish. The button on this tab will try again.", true);
+      if (ok) {
+        note.remove();
+        return;
+      }
+      // Nothing else on the page re-runs this step now, so the failure has to
+      // carry its own retry rather than leaving the provider stuck.
+      note.textContent = "";
+      note.className = "status error";
+      const why = document.createElement("span");
+      why.textContent = "That step didn't finish. ";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "btn";
+      retry.style.marginLeft = "8px";
+      retry.textContent = "Try again";
+      retry.addEventListener("click", () => goToTab(tab));
+      note.appendChild(why);
+      note.appendChild(retry);
     }
 
     navButtons.forEach((btn) => btn.addEventListener("click", () => goToTab(btn.dataset.tab)));
@@ -3332,7 +3389,6 @@
         return false;
       }
 
-      extractBtn.disabled = true;
       extractStatusEl.textContent = "Extracting...";
       extractStatusEl.className = "status";
 
@@ -3351,6 +3407,7 @@
         }
 
         state.facts = data.facts;
+        markDerived("facts");
         renderFacts(factsCardEl, claimWorkspace);
 
         // No patient/case picked yet -- the server auto-filed this encounter
@@ -3377,12 +3434,8 @@
         extractStatusEl.textContent = "Something went wrong: " + err.message;
         extractStatusEl.className = "status error";
         return false;
-      } finally {
-        extractBtn.disabled = false;
       }
     }
-
-    extractBtn.addEventListener("click", () => runExtract());
 
     // ---- Mic capture: tap to talk, tap again fast to lock hands-free ----
     // (Wispr Flow-style control: one button, no modifier keys.)
@@ -3971,6 +4024,7 @@
         }
 
         state.codes = Array.isArray(data.suggestions) ? data.suggestions : [];
+        markDerived("codes");
         renderCodes(codesContainer, claimWorkspace);
         codesStatusEl.textContent = state.codes.length ? "Done." : "No confident code suggestions — add some by hand below if you like.";
         codesStatusEl.className = "status";
@@ -4077,6 +4131,7 @@
 
         claimStatusEl.textContent = "";
         state.claim = data.claim;
+        markDerived("claim");
         state.reviewed = false;
         state.stediSubmission = null;
         renderClaimForm(claimFormEl, claimWorkspace);

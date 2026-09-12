@@ -309,11 +309,26 @@ On New Claim, entering a step runs the stage that fills it — the step buttons
 and the sidebar both go through `goToTab()`, and `STAGE_ON_ENTRY` says what
 each step needs and what fills it.
 
-**Only when the step is empty.** Re-running would overwrite what the provider
-edited by hand and spend another model call doing it, so a step that already
-has something in it is just shown. The button on each tab is the deliberate
-re-run. If you add a stage, give it `ready` and `filled` — getting `filled`
-wrong silently destroys edits.
+**Only when the step is not current.** Each stage records a `fingerprint` of
+the input it was derived from (`markDerived`), and a stage whose input has
+since changed is stale rather than done — so editing the context re-derives
+the facts, and entering codes then sees the facts changed and re-derives too.
+That is the cascade.
+
+Asking merely "does this step have anything in it" is what broke this before:
+facts extracted from one context stayed on screen after the context was
+replaced, because the guard saw facts and skipped the run. A step filled from
+an earlier input is worse than an empty one — it shows a provider facts
+belonging to a transcript they have already replaced.
+
+A hand edit survives as long as the step's input has not changed: editing facts
+does not change `fingerprint(transcript)`, so re-entering Facts leaves the edit
+alone. Change the context afterwards and the facts are re-derived, which is the
+right trade — facts that disagree with the context are worse than a lost edit,
+and the status line says it is re-extracting rather than filling.
+
+If you add a stage, give it `ready`, `current` and an entry in `STAGE_INPUT` —
+getting `current` wrong either destroys edits or shows stale output.
 
 Entering a step whose prerequisite is missing navigates without running: one
 click never cascades three model calls. **Prepare claim** is the deliberate
@@ -328,6 +343,17 @@ in order. Nothing in the New Claim flow should navigate on the user's behalf.
 Each runner reports into its own tab's status line, which is no longer the tab
 being looked at — so `goToTab` puts a note on the destination while the stage
 runs, and leaves an error there if it fails.
+
+**There is no Extract button, and there should not be one.** Extraction is the
+Facts step; a button for it sat on the Context card, so a provider could walk
+into Facts and sit there wondering why nothing had happened. Walking in is the
+trigger. The same reasoning rules out a "suggest codes" or "populate" button —
+if a step needs a manual kick, its `ready`/`current` pair is wrong.
+
+Because nothing else on the page re-runs a step, **a failed stage carries its
+own retry**: `goToTab` replaces the working note with an error line and a
+**Try again** button bound to `goToTab(tab)`. Without it a failure is a dead
+end — the provider is standing on the one screen that would have re-run it.
 
 ### Links
 
