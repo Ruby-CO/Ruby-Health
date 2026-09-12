@@ -210,7 +210,6 @@ function.
 From the UI navigation conventions page. **New views only** — existing views
 are not being retrofitted; they are not costing anything.
 
-- [ ] Its URL fully restores it, including filters, sort and selection
 - [ ] Browser back and forward work from it
 - [ ] Every field naming another object links to that object, and is visibly a link
 - [ ] It uses an existing layout slot
@@ -218,10 +217,26 @@ are not being retrofitted; they are not costing anything.
 A PR without these is incomplete, not "phase one". **A follow-up PR to make the
 previous one usable means the first one wasn't done.**
 
-One honest gap: `pushState` currently passes no URL, so the address bar never
-changes and the first box cannot be ticked yet. Putting view state in the query
-string is its own open item; until it lands, a new view satisfies the other
-three and that one stays open rather than being quietly dropped.
+**URL state is deliberately out of scope.** The conventions page has a fourth
+item — the view's URL fully restoring it, filters and selection included — and
+it has been dropped on purpose while this is a prototype. `pushState` passes a
+state object and no URL, so back and forward work while the address bar never
+changes.
+
+Two reasons, so this does not get re-proposed every few sessions:
+
+- This is a demo shown by the person driving it. Shareable links, bookmarks and
+  surviving a refresh buy almost nothing here, and the retrofit touches every
+  view that navigates.
+- Frontend routing is the layer that will **not** transfer to the real product,
+  which will bring its own router. What transfers is the pipeline
+  (`extract`, `suggestCodes`, `populateClaim`, `buildStediClaim`), the
+  `NotionRepository` seam and the claim-building logic — so that is where
+  hardening pays.
+
+Revisit it if the prototype ever has to be handed to someone to explore
+unattended, or if a link to one encounter needs sending to a colleague. Neither
+is true today.
 
 ### Standing UI constraints
 
