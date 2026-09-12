@@ -344,6 +344,17 @@ Each runner reports into its own tab's status line, which is no longer the tab
 being looked at — so `goToTab` puts a note on the destination while the stage
 runs, and leaves an error there if it fails.
 
+**There is no Extract button, and there should not be one.** Extraction is the
+Facts step; a button for it sat on the Context card, so a provider could walk
+into Facts and sit there wondering why nothing had happened. Walking in is the
+trigger. The same reasoning rules out a "suggest codes" or "populate" button —
+if a step needs a manual kick, its `ready`/`current` pair is wrong.
+
+Because nothing else on the page re-runs a step, **a failed stage carries its
+own retry**: `goToTab` replaces the working note with an error line and a
+**Try again** button bound to `goToTab(tab)`. Without it a failure is a dead
+end — the provider is standing on the one screen that would have re-run it.
+
 ### Links
 
 **One link treatment, and it is `.rh-link`.** Ruby paired with an underline —

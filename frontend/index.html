@@ -730,7 +730,6 @@
             <div style="display:flex; gap:8px;">
               <button id="uploadContextBtn" class="btn" type="button">Upload a file</button>
               <button id="cleanupBtn" class="btn" type="button">Clean up wording</button>
-              <button id="extractBtn" class="btn btn-primary" type="button">Extract clinical facts</button>
             </div>
             <input id="uploadContextInput" type="file" accept=".txt,.md,.markdown,.csv,text/*" hidden />
           </div>
@@ -3008,7 +3007,10 @@
     const cleanupStatusEl = document.getElementById("cleanupStatus");
     const transcriptSummaryBoxEl = document.getElementById("transcriptSummaryBox");
     const transcriptSummaryTextEl = document.getElementById("transcriptSummaryText");
-    const extractBtn = document.getElementById("extractBtn");
+    // The Extract button is gone: extraction is the Facts step, and it ran from
+    // the Context tab, which is what let a provider sit on Facts wondering why
+    // nothing had happened. Walking into Facts runs it. runExtract still
+    // reports here, because Prepare claim reads this line for its error text.
     const extractStatusEl = document.getElementById("extractStatus");
     const micBtn = document.getElementById("micBtn");
     const micLabelEl = document.getElementById("micLabel");
@@ -3169,8 +3171,24 @@
       const stale = stage.ready() && !stage.current() && state.derivedFrom?.[tab];
       const note = stageNote(tab, stale ? stage.restating : stage.working, false);
       const ok = await stage.run();
-      if (ok) note.remove();
-      else stageNote(tab, "That step didn't finish. The button on this tab will try again.", true);
+      if (ok) {
+        note.remove();
+        return;
+      }
+      // Nothing else on the page re-runs this step now, so the failure has to
+      // carry its own retry rather than leaving the provider stuck.
+      note.textContent = "";
+      note.className = "status error";
+      const why = document.createElement("span");
+      why.textContent = "That step didn't finish. ";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.className = "btn";
+      retry.style.marginLeft = "8px";
+      retry.textContent = "Try again";
+      retry.addEventListener("click", () => goToTab(tab));
+      note.appendChild(why);
+      note.appendChild(retry);
     }
 
     navButtons.forEach((btn) => btn.addEventListener("click", () => goToTab(btn.dataset.tab)));
@@ -3371,7 +3389,6 @@
         return false;
       }
 
-      extractBtn.disabled = true;
       extractStatusEl.textContent = "Extracting...";
       extractStatusEl.className = "status";
 
@@ -3417,12 +3434,8 @@
         extractStatusEl.textContent = "Something went wrong: " + err.message;
         extractStatusEl.className = "status error";
         return false;
-      } finally {
-        extractBtn.disabled = false;
       }
     }
-
-    extractBtn.addEventListener("click", () => runExtract());
 
     // ---- Mic capture: tap to talk, tap again fast to lock hands-free ----
     // (Wispr Flow-style control: one button, no modifier keys.)
