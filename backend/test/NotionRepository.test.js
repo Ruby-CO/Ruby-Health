@@ -67,7 +67,9 @@ function fakeNotionClient() {
     dataSources: {
       async query({ data_source_id, filter }) {
         const store = storeFor(data_source_id);
-        const results = [...store.values()].filter((page) => matchesFilter(page, filter));
+        // The real API drops trashed pages from a query. A fake that kept
+        // returning them would let a broken delete look like a working one.
+        const results = [...store.values()].filter((page) => !page.in_trash && matchesFilter(page, filter));
         return { results, has_more: false, next_cursor: null };
       },
     },
@@ -86,11 +88,12 @@ function fakeNotionClient() {
         store.set(page.id, page);
         return page;
       },
-      async update({ page_id, properties }) {
+      async update({ page_id, properties, in_trash }) {
         for (const store of Object.values(stores)) {
           if (store.has(page_id)) {
             const page = store.get(page_id);
-            page.properties = { ...page.properties, ...toResponseProperties(properties) };
+            if (properties) page.properties = { ...page.properties, ...toResponseProperties(properties) };
+            if (in_trash !== undefined) page.in_trash = in_trash;
             return page;
           }
         }
@@ -455,6 +458,83 @@ test("updateClaimStatus rejects an unknown status", async () => {
   });
 
   await assert.rejects(() => repo.updateClaimStatus(claim.claimId, "voided"), NotionRepositoryError);
+});
+
+async function makeDraftClaim(repo) {
+  const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);
+  const claim = await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer Insurance",
+    memberId: "M123456",
+  });
+  return { encounter, artifact, claim };
+}
+
+test("deleteClaim removes a draft from the encounter's claims and from listAllClaims", async () => {
+  const repo = makeRepository();
+  const { encounter, claim } = await makeDraftClaim(repo);
+
+  const deleted = await repo.deleteClaim(claim.claimId);
+  assert.equal(deleted.claimId, claim.claimId);
+
+  assert.equal(await repo.getClaim(claim.claimId), null);
+  assert.deepEqual(await repo.listClaimsForEncounter(encounter.encounterId), []);
+  assert.deepEqual(await repo.listAllClaims(), []);
+});
+
+test("deleteClaim leaves every other claim alone", async () => {
+  const repo = makeRepository();
+  const { encounter, artifact, claim: first } = await makeDraftClaim(repo);
+  const second = await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer Insurance",
+    memberId: "M123456",
+  });
+
+  await repo.deleteClaim(first.claimId);
+
+  const left = await repo.listClaimsForEncounter(encounter.encounterId);
+  assert.deepEqual(left.map((c) => c.claimId), [second.claimId]);
+});
+
+// The point of the whole feature: a claim the payer has seen is the record of
+// what was billed. Every non-draft status refuses, not just "submitted".
+for (const status of ["submitted", "accepted", "rejected", "denied", "pending"]) {
+  test(`deleteClaim refuses a ${status} claim`, async () => {
+    const repo = makeRepository();
+    const { claim } = await makeDraftClaim(repo);
+    await repo.updateClaimStatus(claim.claimId, status);
+
+    await assert.rejects(() => repo.deleteClaim(claim.claimId), NotionRepositoryError);
+    assert.ok(await repo.getClaim(claim.claimId));
+  });
+}
+
+test("deleteClaim refuses a claim another claim was filed against", async () => {
+  const repo = makeRepository();
+  const { encounter, artifact, claim: original } = await makeDraftClaim(repo);
+  await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "corrected",
+    parentClaimId: original.claimId,
+    payerName: "Sample Payer Insurance",
+    memberId: "M123456",
+  });
+
+  // A draft parent is only reachable in an odd order of operations, but an
+  // orphaned correction is worse than a draft that sticks around.
+  await assert.rejects(() => repo.deleteClaim(original.claimId), NotionRepositoryError);
+  assert.ok(await repo.getClaim(original.claimId));
+});
+
+test("deleteClaim rejects an unknown claim id", async () => {
+  const repo = makeRepository();
+  await assert.rejects(() => repo.deleteClaim("CL999"), NotionRepositoryError);
 });
 
 test("getClaimChain returns the original plus a corrected claim pointing at it, oldest first", async () => {

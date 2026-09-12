@@ -375,6 +375,12 @@
     .btn:hover:not(:disabled) { background: var(--border-soft); }
     .btn-primary { border: none; background: var(--ruby); color: var(--cream); }
     .btn-primary:hover:not(:disabled) { background: var(--ruby-hover); }
+    /* Not btn-primary: ruby is this app's "go ahead" colour, and nothing here
+       should read as encouraged. Garnet on --card is 11.7:1. */
+    .btn-destructive { border-color: var(--garnet); color: var(--garnet); background: var(--card); }
+    .btn-destructive:hover:not(:disabled) { background: rgba(107, 15, 30, 0.06); }
+    .delete-claim { margin-top: 16px; }
+    .delete-confirm-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .icon-btn {
       width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); background: var(--card);
       color: var(--ink-2); display: flex; align-items: center; justify-content: center; flex: none; padding: 0;
@@ -2886,10 +2892,104 @@
       return wrap;
     }
 
+    // Two steps, because there is no undo on the other side of this. The first
+    // button only asks; the second is the one that deletes.
+    function renderDeleteClaimAction(claim, reload) {
+      const wrap = document.createElement("div");
+      wrap.className = "delete-claim";
+
+      const status = document.createElement("div");
+      status.className = "status";
+
+      const ask = document.createElement("button");
+      ask.type = "button";
+      ask.className = "btn";
+      ask.textContent = "Delete draft claim";
+
+      const confirm = document.createElement("div");
+      confirm.className = "delete-confirm";
+      confirm.hidden = true;
+
+      const question = document.createElement("div");
+      question.className = "stedi-note";
+      question.textContent = `Delete ${claim.claimId}? It was never sent, so nothing reaches the payer -- but the draft goes for good, and the encounter it was built from stays.`;
+      confirm.appendChild(question);
+
+      const row = document.createElement("div");
+      row.className = "delete-confirm-row";
+
+      const yes = document.createElement("button");
+      yes.type = "button";
+      yes.className = "btn btn-destructive";
+      yes.textContent = "Delete it";
+
+      const no = document.createElement("button");
+      no.type = "button";
+      no.className = "btn";
+      no.textContent = "Keep it";
+
+      // Deliberately not btn-primary: ruby is this app's "do the thing"
+      // colour, and the encouraged action here is walking away.
+      no.addEventListener("click", () => {
+        confirm.hidden = true;
+        ask.hidden = false;
+        status.textContent = "";
+        status.className = "status";
+      });
+
+      ask.addEventListener("click", () => {
+        ask.hidden = true;
+        confirm.hidden = false;
+        no.focus();
+      });
+
+      yes.addEventListener("click", async () => {
+        yes.disabled = true;
+        no.disabled = true;
+        status.textContent = `Deleting ${claim.claimId}...`;
+        status.className = "status";
+        try {
+          const res = await fetch(`/api/claims/${encodeURIComponent(claim.claimId)}`, { method: "DELETE" });
+          const data = await res.json();
+          if (!res.ok) {
+            status.textContent = data.error || "Could not delete this claim.";
+            status.className = "status error";
+            yes.disabled = false;
+            no.disabled = false;
+            return;
+          }
+          // The card being read is the thing that just went away, so the list
+          // has to be the thing that redraws.
+          reload();
+        } catch (err) {
+          status.textContent = "Something went wrong: " + err.message;
+          status.className = "status error";
+          yes.disabled = false;
+          no.disabled = false;
+        }
+      });
+
+      row.appendChild(yes);
+      row.appendChild(no);
+      confirm.appendChild(row);
+
+      wrap.appendChild(ask);
+      wrap.appendChild(confirm);
+      wrap.appendChild(status);
+      return wrap;
+    }
+
     // One place decides what a claim can do, so a card never offers an action
     // its status cannot support.
     function renderClaimActions(claim, reload) {
-      return claim.status === "draft" ? renderSubmitClaimAction(claim, reload) : renderAmendClaimAction(claim, reload);
+      const actions =
+        claim.status === "draft" ? renderSubmitClaimAction(claim, reload) : renderAmendClaimAction(claim, reload);
+      // Only a draft is deletable. Once a payer has seen a claim it is the
+      // record of what was billed, so the option is not offered rather than
+      // offered and refused. It rides inside the same .submit-actions block:
+      // both are irreversible, and they belong behind one rule, not two.
+      if (claim.status === "draft") actions.appendChild(renderDeleteClaimAction(claim, reload));
+      return actions;
     }
 
     function renderClaimCard(claim, encounter, caseObj, reload) {

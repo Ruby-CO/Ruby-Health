@@ -415,6 +415,25 @@ rule, never flush against content someone was only reading. Amend rows default
 to **Keep** — dropping a code is an explicit choice, never implied by an empty
 field.
 
+**Only a `draft` claim can be deleted.** Once a payer has seen a claim it is
+the record of what was billed, and that is not ours to erase — so the option
+is not offered on it rather than offered and refused. The rule lives in
+`repository.deleteClaim`, not in the route or the button: `DELETE
+/api/claims/:claimId` only reports the refusal. A claim another claim was
+chained to is kept for the same reason — deleting it orphans the correction
+pointing at it.
+
+Deleting is two steps — a quiet **Delete draft claim**, then an explicit
+confirm naming the claim — and both live inside the *same* `.submit-actions`
+block as Submit, behind one rule rather than two. The confirm's destructive
+button is `.btn-destructive` (garnet outline), never `.btn-primary`: ruby is
+this app's "go ahead" colour, and nothing here should read as encouraged.
+Focus lands on **Keep it**.
+
+On Notion this is the trash, not an erase, so a misclick is still recoverable
+from the workspace — but the UI does not promise that, because the provider
+has no way to reach it.
+
 ### Color
 
 `--gold` is decorative only — dots, rules, borders. It fails WCAG AA as text.

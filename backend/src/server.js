@@ -657,6 +657,22 @@ app.get("/api/encounters/:encounterId/claims", async (req, res) => {
   }
 });
 
+// The repository decides what is deletable -- a draft, never chained to. The
+// route only reports its refusal, so the rule lives in one place.
+app.delete("/api/claims/:claimId", async (req, res) => {
+  if (!requireRepository(res)) return;
+  try {
+    const claim = await repository.deleteClaim(req.params.claimId);
+    res.json({ claim });
+  } catch (err) {
+    if (err instanceof NotionRepositoryError) {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error("Deleting claim failed:", err);
+    res.status(502).json({ error: "Deleting the claim failed. See server logs for details." });
+  }
+});
+
 app.post("/api/extract", async (req, res) => {
   const { transcript, encounterId } = req.body || {};
 
