@@ -1,0 +1,796 @@
+{
+  "runAt": "2026-09-13T23:58:17.508Z",
+  "base": "http://127.0.0.1:3000",
+  "summary": {
+    "encounters": 20,
+    "diagnosisRecall": 0.9615384615384616,
+    "procedureRecall": 0.9090909090909091,
+    "emExact": 0.7,
+    "emWithinOne": 0.8,
+    "emUpcodedCount": 1,
+    "linkageAccuracy": 0.8,
+    "groundingRate": 0.90625,
+    "necessityPhraseRecall": 0.5652173913043478,
+    "forbiddenCodeCount": 1,
+    "encountersWithForbiddenCode": 1,
+    "extraCodeCount": 40,
+    "claimErrors": 0
+  },
+  "results": [
+    {
+      "id": "001-strep-pharyngitis",
+      "tests": "Baseline single-problem visit with a clearly documented procedure.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R50.9"
+      ],
+      "grounding": {
+        "quotes": 1,
+        "verified": 1,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 2
+      },
+      "linkage": {
+        "expected": 1,
+        "correct": 1,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "002-pharyngitis-plus-immunization",
+      "tests": "Two unrelated problems in one visit. The failing case for the old pointer bug: the vaccine admin must link to the immunization code, not the sore throat.",
+      "diagnoses": {
+        "expected": 2,
+        "hit": 2,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 2,
+        "hit": 2,
+        "missed": []
+      },
+      "em": {
+        "verdict": "missing",
+        "distance": null,
+        "expected": "99213",
+        "actual": null
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R50.9",
+        "90686"
+      ],
+      "grounding": {
+        "quotes": 6,
+        "verified": 6,
+        "unsupported": [],
+        "expectedPhrases": 2,
+        "phrasesFound": 2
+      },
+      "linkage": {
+        "expected": 2,
+        "correct": 2,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "003-uti-uncomplicated",
+      "tests": "Urinalysis ordered with clear medical necessity language.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R30.0",
+        "R35.0"
+      ],
+      "grounding": {
+        "quotes": 3,
+        "verified": 3,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 2
+      },
+      "linkage": {
+        "expected": 1,
+        "correct": 1,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "004-ankle-sprain-laterality",
+      "tests": "Specificity trap. Laterality is stated explicitly, so an unspecified-side code is a miss.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "S93.411A",
+        "W21.02XA",
+        "L4360"
+      ],
+      "grounding": {
+        "quotes": 5,
+        "verified": 5,
+        "unsupported": [],
+        "expectedPhrases": 2,
+        "phrasesFound": 1
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "005-diabetes-followup-stable",
+      "tests": "Chronic disease management. Tests that a stable chronic visit is not over-levelled.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "Z79.4",
+        "83036",
+        "G0245"
+      ],
+      "grounding": {
+        "quotes": 3,
+        "verified": 3,
+        "unsupported": [],
+        "expectedPhrases": 2,
+        "phrasesFound": 2
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "006-diabetes-uncontrolled-complex",
+      "tests": "Higher-complexity chronic visit: uncontrolled disease, medication change, multiple problems addressed. Should level above the stable case.",
+      "diagnoses": {
+        "expected": 2,
+        "hit": 2,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99214",
+        "actual": "99214"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "83036"
+      ],
+      "grounding": {
+        "quotes": 5,
+        "verified": 5,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 3
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "007-thin-documentation",
+      "tests": "Deliberately sparse. The system should code conservatively and say the record is thin, not invent specificity.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "missing",
+        "distance": null,
+        "expected": "99212",
+        "actual": null
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "G47.00",
+        "80053",
+        "85025",
+        "84443"
+      ],
+      "grounding": {
+        "quotes": 1,
+        "verified": 1,
+        "unsupported": [],
+        "expectedPhrases": 1,
+        "phrasesFound": 0
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "008-preventive-plus-problem",
+      "tests": "Annual physical where a new problem is addressed. Both a preventive and a problem visit code are warranted; the problem code carries modifier 25 territory.",
+      "diagnoses": {
+        "expected": 2,
+        "hit": 2,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 0,
+        "missed": [
+          "99395"
+        ]
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "99396"
+      ],
+      "grounding": {
+        "quotes": 2,
+        "verified": 2,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 3
+      },
+      "linkage": {
+        "expected": 1,
+        "correct": 0,
+        "wrong": [
+          {
+            "cpt": "99395",
+            "reason": "service line absent from claim"
+          }
+        ],
+        "claimError": null
+      }
+    },
+    {
+      "id": "009-no-procedure-performed",
+      "tests": "A procedure is discussed and explicitly deferred. The system must not code a service that never happened.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99214",
+        "actual": "99214"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R51.9",
+        "95886"
+      ],
+      "grounding": {
+        "quotes": 4,
+        "verified": 4,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 1
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "010-hypertension-followup",
+      "tests": "Straightforward chronic follow-up with no medication change.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [],
+      "grounding": {
+        "quotes": 1,
+        "verified": 1,
+        "unsupported": [],
+        "expectedPhrases": 2,
+        "phrasesFound": 1
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "011-laceration-repair",
+      "tests": "Procedure with a size and location that determine the code. Tests that measurable detail is captured.",
+      "diagnoses": {
+        "expected": 2,
+        "hit": 1,
+        "missed": [
+          "S61.412A"
+        ]
+      },
+      "procedures": {
+        "expected": 2,
+        "hit": 2,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": null,
+        "actual": null
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "S61.212A",
+        "W26.0XXA",
+        "90714"
+      ],
+      "grounding": {
+        "quotes": 4,
+        "verified": 0,
+        "unsupported": [
+          "Follow-up in ten days for suture removal"
+        ],
+        "expectedPhrases": 3,
+        "phrasesFound": 1
+      },
+      "linkage": {
+        "expected": 2,
+        "correct": 1,
+        "wrong": [
+          {
+            "cpt": "12001",
+            "reason": "not linked to S61.412A",
+            "got": "A"
+          }
+        ],
+        "claimError": null
+      }
+    },
+    {
+      "id": "012-copd-exacerbation",
+      "tests": "Acute-on-chronic. The exacerbation code is more specific than the base disease code.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99214",
+        "actual": "99214"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R06.2",
+        "R09.02",
+        "94760"
+      ],
+      "grounding": {
+        "quotes": 6,
+        "verified": 5,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 3
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "013-three-problems-one-visit",
+      "tests": "Three distinct problems, each with its own management. Stresses diagnosis pointer assignment across multiple service lines.",
+      "diagnoses": {
+        "expected": 3,
+        "hit": 3,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99214",
+        "actual": "99214"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "20610",
+        "36415"
+      ],
+      "grounding": {
+        "quotes": 6,
+        "verified": 6,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 3
+      },
+      "linkage": {
+        "expected": 1,
+        "correct": 1,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "014-otitis-media-pediatric-laterality",
+      "tests": "Laterality plus recurrence. Left ear is stated; a bilateral or unspecified code is a miss.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "missing",
+        "distance": null,
+        "expected": "99214",
+        "actual": null
+      },
+      "forbidden": [
+        "H66.001"
+      ],
+      "extraCodes": [
+        "H66.91",
+        "H66.001",
+        "H65.492",
+        "H66.93",
+        "R50.9",
+        "R63.4",
+        "92014"
+      ],
+      "grounding": {
+        "quotes": 4,
+        "verified": 4,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 1
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "015-em-level-brief",
+      "tests": "Minimal problem, minimal work. Should land at the low end; over-levelling here is upcoding.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "off-by-one",
+        "distance": 1,
+        "expected": "99212",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [],
+      "grounding": {
+        "quotes": 0,
+        "verified": 0,
+        "unsupported": [],
+        "expectedPhrases": 2,
+        "phrasesFound": 0
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "016-chest-pain-workup",
+      "tests": "Higher complexity with real risk. An EKG is performed and clearly documented.",
+      "diagnoses": {
+        "expected": 2,
+        "hit": 2,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "em": {
+        "verdict": "missing",
+        "distance": null,
+        "expected": "99215",
+        "actual": null
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R06.02",
+        "Z82.49",
+        "99244"
+      ],
+      "grounding": {
+        "quotes": 4,
+        "verified": 4,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 0
+      },
+      "linkage": {
+        "expected": 1,
+        "correct": 1,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "017-depression-screening-and-diagnosis",
+      "tests": "A screening instrument is administered and scored, which is separately reportable alongside the diagnosis.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "em": {
+        "verdict": "off-by-one",
+        "distance": -1,
+        "expected": "99214",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [],
+      "grounding": {
+        "quotes": 4,
+        "verified": 3,
+        "unsupported": [],
+        "expectedPhrases": 3,
+        "phrasesFound": 1
+      },
+      "linkage": {
+        "expected": 1,
+        "correct": 1,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "018-followup-no-new-problem",
+      "tests": "Nurse-level follow-up with no physician decision making. Tests restraint at the very bottom of the scale.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99211",
+        "actual": "99211"
+      },
+      "forbidden": [],
+      "extraCodes": [],
+      "grounding": {
+        "quotes": 2,
+        "verified": 2,
+        "unsupported": [],
+        "expectedPhrases": 1,
+        "phrasesFound": 0
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "019-conflicting-detail",
+      "tests": "The patient contradicts themselves about duration. The system should not silently pick one and present it as a quoted fact.",
+      "diagnoses": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": "99213",
+        "actual": "99213"
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "J40",
+        "95"
+      ],
+      "grounding": {
+        "quotes": 3,
+        "verified": 3,
+        "unsupported": [],
+        "expectedPhrases": 1,
+        "phrasesFound": 0
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    },
+    {
+      "id": "020-procedure-without-stated-necessity",
+      "tests": "A service is performed but the transcript never says why. Medical necessity language should be thin or absent, and the system should not fabricate a justification.",
+      "diagnoses": {
+        "expected": 0,
+        "hit": 0,
+        "missed": []
+      },
+      "procedures": {
+        "expected": 1,
+        "hit": 1,
+        "missed": []
+      },
+      "em": {
+        "verdict": "correct",
+        "distance": 0,
+        "expected": null,
+        "actual": null
+      },
+      "forbidden": [],
+      "extraCodes": [
+        "R39.9"
+      ],
+      "grounding": {
+        "quotes": 0,
+        "verified": 0,
+        "unsupported": [],
+        "expectedPhrases": 0,
+        "phrasesFound": 0
+      },
+      "linkage": {
+        "expected": 0,
+        "correct": 0,
+        "wrong": [],
+        "claimError": null
+      }
+    }
+  ]
+}
