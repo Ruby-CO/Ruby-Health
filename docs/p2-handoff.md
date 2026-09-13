@@ -1,6 +1,7 @@
 # P2 handoff — pipeline rebuild
 
-Verified against `master` at `01da664`, 13 Sep 2026. Everything in "Current state"
+Verified against `master` at `01da664`, 13 Sep 2026; models, caps and baseline
+revised the same day after PR #30. Everything in "Current state"
 below was read out of the code, not recalled. If you are picking this up much
 later, re-check that section first — the rest of the document depends on it.
 
@@ -18,22 +19,35 @@ reason to do this before building UI on top of the pipeline's output.
 
 ---
 
-## Before you start: there is still no baseline
+## The baseline
 
-**Do not start P2 until the eval suite has been run once against a live server.**
+P2's definition of done is "eval score at or above baseline". The baseline is
+`eval/results/2026-09-13T23-27-52-451Z.json` — Opus 5, 20 encounters, run on 13
+Sep 2026 after the truncation fix below. `eval/results/README.md` says which
+file is which; the earlier one in that folder is a bug record, not a baseline.
 
-P2's definition of done is "eval score at or above baseline". There is no
-baseline. Without one you cannot tell an improvement from a regression, and the
-regression you are most likely to cause here — a merged extract+code call that
-codes slightly worse — is invisible without it.
+Headline numbers, so you know what "at or above" means: diagnosis recall 100%,
+procedure recall 81.8%, E/M exact 75%, linkage 80%, quote grounding 86.2%,
+necessity phrase recall 54.3%, 3 forbidden codes across 2 encounters, 0 upcoded.
+
+**It is one run.** Extraction was not truncated in either run, yet necessity
+phrase recall moved 26 points between them — that is model variance, not the
+fix. Do a second baseline run before drawing conclusions from a small movement.
+
+The first-ever live run found a real bug: on Opus 5, 7 of 20 coding calls hit
+`max_tokens: 1024`, and a truncated tool call came back as *zero suggestions
+with no error*. Both stages now cap at 4096 and throw on `stop_reason:
+"max_tokens"` (PR #30). Nobody had run the eval after the claim path moved to
+Opus, so this shipped to the live site. **Run the eval after any model or
+prompt change, not just at phase boundaries.**
 
 ```bash
 cd backend && npm start &     # needs ANTHROPIC_API_KEY in backend/.env
-node eval/run.mjs             # ~$1.50, one model call per encounter
+node eval/run.mjs             # ~$1.50 on Opus 5, two model calls per encounter
 ```
 
-It writes a timestamped scorecard to `eval/results/`. **Commit that file.** It is
-the number every later phase is measured against.
+It writes a timestamped scorecard to `eval/results/`. Commit the ones worth
+comparing against and add them to the README there.
 
 Read `eval/README.md` before interpreting it. Two things that matter:
 
@@ -53,8 +67,8 @@ The automatic claim path is **two model calls**, then deterministic assembly:
 
 | Stage | File | Model call? | Notes |
 |---|---|---|---|
-| Extract clinical facts | `backend/src/pipeline/extract.js:42` | Yes | `max_tokens: 1024`, forced tool call |
-| Suggest codes | `backend/src/pipeline/suggestCodes.js:46` | Yes | `max_tokens: 1024`, forced tool call |
+| Extract clinical facts | `backend/src/pipeline/extract.js:42` | Yes | `max_tokens: 4096`, forced tool call, throws on truncation |
+| Suggest codes | `backend/src/pipeline/suggestCodes.js:46` | Yes | `max_tokens: 4096`, forced tool call, throws on truncation |
 | Verify quotes | `verifyQuotes.js` | No | string matching |
 | Validate codes | `validateCodes.js` | No | list lookup, warns only |
 | Build claim | `populateClaim.js` | No | deterministic |
@@ -64,9 +78,9 @@ automatic path — it sits behind a manual button on the Context card
 (`frontend/index.html:3666`). `STAGE_ON_ENTRY` (`frontend/index.html:3444`) only
 runs facts → codes → claim.
 
-Models, as of this writing: claim path `claude-sonnet-5`, transcript cleanup
-`claude-haiku-4-5`. Both declared in four places — `backend/src/server.js:41` and
-`:46` (the defaults that actually apply), `render.yaml`, `backend/.env.example`,
+Models, as of this writing: claim path `claude-opus-5`, transcript cleanup
+`claude-haiku-4-5`. Both declared in four places — `backend/src/server.js:38` and
+`:43` (the defaults that actually apply), `render.yaml`, `backend/.env.example`,
 and the standing rule in `CLAUDE.md`. Change all four or the next session will
 revert you.
 
@@ -91,9 +105,11 @@ reasoning in hand, and halves the round trips.
 
 **Traps:**
 
-- **`max_tokens: 1024` will be too small.** Both stages currently use it for one
-  output each; one merged response has to carry both. Hitting the cap truncates
-  mid-structure and costs a retry. Raise it deliberately.
+- **Watch `max_tokens` on the merged call.** Each stage now has 4096 for one
+  output; the merged response carries both. The longest coding response seen in
+  a clean run was 1161 tokens and extraction runs ~600, so 4096 has headroom, but
+  measure it. A truncated call now throws rather than returning nothing — keep
+  that guard on the merged stage.
 - Both stages use `tool_choice: { type: "tool", name: ... }` (forced). That is
   fine on Sonnet 5 and Opus 5. It returns a 400 on the Fable/Mythos family, so if
   the model ever moves there, this breaks.
@@ -139,12 +155,12 @@ model-dependent, and **below it, caching silently does nothing** — no error, j
 
 | Model | Minimum prefix |
 |---|---:|
-| Claude Sonnet 5 (current claim path) | **1024 tokens** |
-| Claude Opus 5 | 512 tokens |
+| Claude Opus 5 (current claim path) | **512 tokens** |
+| Claude Sonnet 5 | 1024 tokens |
 | Claude Haiku 4.5 | 4096 tokens |
 
 The two existing system prompts are ~380 and ~797 characters — roughly 300 tokens
-combined. **That is under Sonnet 5's minimum on its own.** The cacheable prefix
+combined. **That is under Opus 5's minimum on its own.** The cacheable prefix
 includes tool definitions as well as system text, so measure it rather than
 estimating: use `messages.count_tokens` before concluding the cache is broken.
 
@@ -195,21 +211,19 @@ it after.
 
 ---
 
-## One decision left open on purpose
+## The model question, and what is still open
 
 `docs/mvp-v1-build-plan.html` says P2 includes **"Move to Opus 5 and tune effort
-against the eval suite."** The claim path was deliberately set to Sonnet on 13 Sep
-2026 — not as a cost decision, and not as a judgment that Sonnet codes better, but
-because nobody has measured it and the eval suite could not answer the question
-yet.
+against the eval suite."** The move happened on 13 Sep 2026 (`50b667d`), and
+`CLAUDE.md` now tells sessions not to "fix" the model IDs. The baseline above is
+an Opus 5 number.
 
-These are not in conflict: the plan's operative instruction is *tune against the
-eval suite*. But the plan's written default is Opus, so read that line as a
-question to settle with evidence, not a directive to follow.
-
-**When you settle it, score both models rather than swapping one for the other.**
-Two runs, roughly $1.50 (Opus) and $0.60 (Sonnet). Note that the choice interacts
-with change 3 above: Opus 5 halves the cacheable-prefix minimum from 1024 to 512.
+What has *not* happened is the second half: nobody has scored Sonnet 5 on the
+same suite, so "Opus codes better" is still an assumption. If cost per claim
+becomes the pressure, **run the suite on Sonnet before switching** — one run,
+roughly $0.60 — and compare against the baseline rather than guessing. The
+choice interacts with change 3 above: Sonnet doubles the cacheable-prefix
+minimum from 512 to 1024, which the current prompts are even further under.
 
 ---
 
@@ -234,7 +248,7 @@ with change 3 above: Opus 5 halves the cacheable-prefix minimum from 1024 to 512
 Four suites, no single command:
 
 ```bash
-cd backend && npm test                  # 181 tests
+cd backend && npm test                  # 186 tests
 node --test eval/test/*.test.js         #  19
 node --test reference/test/*.test.js    #  21
 node eval/run.mjs --mock                # harness check, free, scores 100% by construction
