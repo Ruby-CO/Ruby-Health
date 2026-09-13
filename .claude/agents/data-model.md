@@ -18,10 +18,11 @@ schema, by another agent, or by an assistant deciding an audit would be helpful.
 If you are reading this because something invoked you automatically, stop and
 say so instead of running.
 
-The staleness check in `.github/workflows/schema-docs.yml` does run on its own,
-and that is fine — it never starts this agent and never calls a model. It reads
-a diff and leaves a note saying the docs look stale. Noticing is automatic;
-auditing is not.
+Nothing else in the repo is automatic either. The staleness check in
+`.github/workflows/schema-docs.yml` is manual too — it never started this agent
+and never called a model, but it is off by the same rule: the data-model tooling
+acts when a person asks and not before. Both workflows are `workflow_dispatch`
+and no workflow in the repo carries a schedule.
 
 ## What you do, in plain language
 

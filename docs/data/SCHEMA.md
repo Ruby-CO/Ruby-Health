@@ -208,10 +208,13 @@ is the point — but their absence is not news.
    once and watches.
 6. Re-run the `data-model` agent so the diagram and audit reflect the change.
 
-**CI will remind you about step 6.** A change under `backend/src/repository/`
-that does not also refresh `docs/data/` fails the *Schema docs* check on the
-pull request (`.github/workflows/schema-docs.yml`). It is a reminder, not a
-gate — it runs no model and regenerates nothing, and on master it reports
-without going red. A pipeline change alone leaves a note rather than a
-failure, because a file path cannot tell a renamed field from a reworded
-prompt.
+**Nothing reminds you about step 6 automatically, on purpose.** The *Schema
+docs* workflow (`.github/workflows/schema-docs.yml`) will tell you whether a
+schema change refreshed `docs/data/`, but it is manual: Actions → *Schema docs*
+→ **Run workflow**. It runs no model and regenerates nothing — it reads a diff
+and reports. A pipeline change alone leaves a note rather than a failure,
+because a file path cannot tell a renamed field from a reworded prompt.
+
+That is a deliberate choice rather than an oversight: the data-model tooling
+does not act unless a person asks it to, and that covers noticing as well as
+auditing. The workflow file documents how to put it back on automatic.

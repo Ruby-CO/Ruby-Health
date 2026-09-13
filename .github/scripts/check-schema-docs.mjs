@@ -6,8 +6,10 @@
 // in docs/data/ are describing a schema that no longer exists, and the next
 // person to read them is reading fiction.
 //
-// It only ever reports. It never edits a file, and the workflow only runs it
-// on commits that touch the watched paths -- see .github/workflows/schema-docs.yml.
+// It only ever reports. It never edits a file, and nothing starts it on its own:
+// the workflow that wraps it is manual (workflow_dispatch), the same as the
+// audit itself -- see .github/workflows/schema-docs.yml, which documents how to
+// put it back on automatic if that is ever wanted.
 //
 // Run it locally the same way CI does:
 //   node .github/scripts/check-schema-docs.mjs            # vs origin/master

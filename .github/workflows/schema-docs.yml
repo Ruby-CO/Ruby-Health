@@ -1,32 +1,41 @@
 name: Schema docs
 
-# Deliberately not part of CI, and deliberately not on every commit.
+# Manual only. Nothing in this repo starts it.
 #
-# The `paths` filter means this workflow does not exist for the great majority
-# of changes -- it wakes up only when a commit touches the data model or the
-# docs that describe it. When it does wake up it asks one cheap question: did
-# the schema move without the generated docs being refreshed? No model is
-# called and nothing is regenerated; refreshing them is a human running the
-# data-model agent. See .github/scripts/check-schema-docs.mjs.
+# It used to run automatically on commits touching the data model, flagging a
+# schema change that had not refreshed docs/data/. That is now off by deliberate
+# choice: the data-model tooling does not act unless a person asks it to, and
+# that rule covers noticing as well as auditing.
+#
+# What it still does, when you run it: read a diff and say whether the schema
+# moved without the generated docs being refreshed. No model is called, nothing
+# is regenerated, no file is written. Refreshing the docs is the separate
+# "Refresh data model" workflow, which is also manual.
+#
+# To put it back on automatic, replace the `on:` block with:
+#
+#   on:
+#     pull_request:
+#       branches: [master]
+#       paths: ["backend/src/repository/**", "backend/src/pipeline/**", "docs/data/**"]
+#     push:
+#       branches: [master]
+#       paths: ["backend/src/repository/**", "backend/src/pipeline/**", "docs/data/**"]
+#
+# The script still fails the run on a pull_request event, so restoring that
+# trigger restores the gating behaviour with no other change.
+
 on:
-  pull_request:
-    branches: [master]
-    # Repeated verbatim under `push` below: GitHub Actions rejects YAML
-    # anchors, so the two lists have to be kept in step by hand.
-    paths:
-      - "backend/src/repository/**"
-      - "backend/src/pipeline/**"
-      - "docs/data/**"
-  push:
-    branches: [master]
-    paths:
-      - "backend/src/repository/**"
-      - "backend/src/pipeline/**"
-      - "docs/data/**"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Compare against this ref (branch, tag or SHA)"
+        required: false
+        default: "master"
 
 jobs:
   check:
-    name: Data-model docs up to date
+    name: Are the data-model docs stale?
     runs-on: ubuntu-latest
     steps:
       # Full history: the check diffs a range, and a shallow clone has no base
@@ -36,8 +45,7 @@ jobs:
           fetch-depth: 0
 
       - name: Check whether the docs still describe the code
-        env:
-          GITHUB_EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-        run: node .github/scripts/check-schema-docs.mjs
+        run: |
+          BASE="${{ inputs.base }}"
+          git rev-parse --verify "origin/$BASE" >/dev/null 2>&1 && BASE="origin/$BASE"
+          node .github/scripts/check-schema-docs.mjs "$BASE" HEAD
