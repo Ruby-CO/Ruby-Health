@@ -44,12 +44,15 @@ function buildEra({
   groupCode = "CO",
   reasonCode = "50",
   claimCount = 1,
+  // CLP01 per claim loop -- the control number Ruby sent. Defaults to the
+  // `ruby-<n>` placeholder claims carried before Ruby sent its own id.
+  patientControlNumbers = null,
 } = {}) {
   const claimBlocks = Array.from({ length: claimCount }, (_, i) => {
     const controlNumber = claimCount > 1 && payerClaimControlNumber ? `${payerClaimControlNumber}-${i + 1}` : payerClaimControlNumber;
     return [
       `LX*${i + 1}~`,
-      `CLP*ruby-${i + 1}*${statusCode}*${billed}*${paid}*${patientResponsibility}*ZZ*${controlNumber}*11*1~`,
+      `CLP*${(patientControlNumbers && patientControlNumbers[i]) || `ruby-${i + 1}`}*${statusCode}*${billed}*${paid}*${patientResponsibility}*ZZ*${controlNumber}*11*1~`,
       `DTM*232*${remittanceDate}~`,
       "SVC*HC`99213*" + billed + "*" + paid + "**1*HC`99213*1~",
       `DTM*472*${remittanceDate}~`,
@@ -176,16 +179,50 @@ test("every adjudication status maps to one Ruby claim status", async () => {
   }
 });
 
-test("a multi-claim document files the first and reports the rest", async () => {
+test("a multi-claim document files the claim it was called for, not the first", async () => {
+  // This used to take parsedClaims[0] regardless, which filed another claim's
+  // verdict, ICN and amounts onto this one.
   const repository = stubRepository();
   const result = await ingestRemittance({
     repository,
     adjustmentCodes,
     claimId: "CL001",
-    remittance: buildEra({ claimCount: 3 }),
+    remittance: buildEra({ claimCount: 3, patientControlNumbers: ["CL007", "CL001", "CL009"] }),
   });
 
   assert.equal(result.otherClaimsInDocument, 2);
+  assert.equal(repository.calls.feedback.length, 1);
+  assert.equal(repository.calls.feedback[0].payerClaimControlNumber, "2026250012345-2");
+});
+
+test("a multi-claim document naming none of them is refused rather than guessed", async () => {
+  const repository = stubRepository();
+  await assert.rejects(
+    () =>
+      ingestRemittance({
+        repository,
+        adjustmentCodes,
+        claimId: "CL001",
+        remittance: buildEra({ claimCount: 3 }),
+      }),
+    RemittanceIngestError
+  );
+  assert.equal(repository.calls.feedback.length, 0);
+});
+
+test("a single-claim document is filed even when its control number does not match", async () => {
+  // Claims submitted before Ruby sent its own id went out as
+  // `ruby-<timestamp>`. Their remittances have to stay filable, and with one
+  // claim in the document there is nothing to confuse it with.
+  const repository = stubRepository();
+  const result = await ingestRemittance({
+    repository,
+    adjustmentCodes,
+    claimId: "CL001",
+    remittance: buildEra({ claimCount: 1 }),
+  });
+
+  assert.equal(result.otherClaimsInDocument, 0);
   assert.equal(repository.calls.feedback.length, 1);
 });
 

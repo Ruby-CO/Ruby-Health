@@ -1033,19 +1033,17 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
       throw err;
     }
 
-    let stediClaim;
-    try {
-      stediClaim = buildStediClaim(correctedClaim, {
-        claimFrequencyCode: "7",
-        originalReferenceNumber: original.payerClaimControlNumber,
-      });
-    } catch (err) {
-      if (err instanceof StediMappingError) return res.status(400).json({ error: err.message });
-      throw err;
-    }
-
-    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
-
+    // The row is created before the payload is mapped, not after. The payer
+    // echoes CLP01 back on the remittance, so buildStediClaim can only send
+    // this claim's real id if the row already exists -- filing it afterwards
+    // is why corrections went out as `ruby-<timestamp>` and came back
+    // matching nothing.
+    //
+    // It is filed as a draft and promoted once Stedi accepts it, so a mapping
+    // error or a rejected submission leaves the correction on the encounter
+    // rather than no trace at all. That is the same reasoning as
+    // persistClaimDraft on the original path, and #23's delete path can clear
+    // a draft that never went anywhere.
     const correctedArtifact = await repository.createArtifact({
       encounterId: original.encounterId,
       stage: "claim",
@@ -1060,6 +1058,22 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
       payerName: original.payerName,
       memberId: original.memberId,
     });
+
+    let stediClaim;
+    try {
+      stediClaim = buildStediClaim(
+        { ...correctedClaim, claimId: correctedClaimRow.claimId },
+        {
+          claimFrequencyCode: "7",
+          originalReferenceNumber: original.payerClaimControlNumber,
+        }
+      );
+    } catch (err) {
+      if (err instanceof StediMappingError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+
+    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
     await repository.updateClaimStatus(correctedClaimRow.claimId, "submitted");
 
     res.json({ claim: correctedClaimRow, stediClaim, stediResponse });
@@ -1131,19 +1145,11 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
       return res.status(400).json({ error: "No populated claim is on file for this encounter to appeal." });
     }
 
-    let stediClaim;
-    try {
-      stediClaim = buildStediClaim(artifact.content, {
-        claimFrequencyCode: "7",
-        originalReferenceNumber: original.payerClaimControlNumber,
-      });
-    } catch (err) {
-      if (err instanceof StediMappingError) return res.status(400).json({ error: err.message });
-      throw err;
-    }
-
-    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
-
+    // Created before the payload is mapped, for the same reason as the
+    // correction path above: the claim's own id has to exist to be sent as
+    // CLP01, and a failed submission should leave the appeal on the encounter
+    // rather than nothing.
+    //
     // The letter is the human-facing record of why this went back. It rides
     // on the claim artifact because there is no appeal stage to put it in.
     const appealArtifact = await repository.createArtifact({
@@ -1160,6 +1166,22 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
       payerName: original.payerName,
       memberId: original.memberId,
     });
+
+    let stediClaim;
+    try {
+      stediClaim = buildStediClaim(
+        { ...artifact.content, claimId: appealClaimRow.claimId },
+        {
+          claimFrequencyCode: "7",
+          originalReferenceNumber: original.payerClaimControlNumber,
+        }
+      );
+    } catch (err) {
+      if (err instanceof StediMappingError) return res.status(400).json({ error: err.message });
+      throw err;
+    }
+
+    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
     await repository.updateClaimStatus(appealClaimRow.claimId, "submitted");
 
     res.json({ claim: appealClaimRow, stediClaim, stediResponse });
