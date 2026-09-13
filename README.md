@@ -40,4 +40,5 @@ Note: the free plan spins the service down after periods of inactivity, so the f
 - [x] Piece 5: tabbed, un-gated UI — all steps share one data model, no forced order
 - [x] Piece 6: live mic capture via Web Speech API
 - [x] Piece 7: deploy as a shareable link (Render blueprint — see "Deploying" above; you run the actual deploy since it needs your own hosting account)
+- [x] Piece 8: Provider section — the billing provider's name, organization, NPI and tax ID, stored once and used to build every claim
 
