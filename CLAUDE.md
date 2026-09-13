@@ -400,6 +400,27 @@ Add a bucket there, not by hand-building another tab strip. The one without a
 `match` is All history, which is the activity feed rather than a slice of the
 claims.
 
+### Adding a patient
+
+**Patients** is the one place a patient is created outside the New Claim intake
+modal. The button is `.btn-primary` because adding one is the only action that
+route offers — it is the loud action there, and Submit is somewhere else.
+
+The form reuses `.field-grid` + `<label>`, the same labelled-field primitive as
+the Claim form. Don't fall back to bare placeholders: a `type="date"` input
+with no label reads as `mm/dd/yyyy`, which does not say *birth*.
+
+Two things it must keep doing, both learned by watching it fail:
+
+- **Clear the search box on success.** A query still in the box filters out the
+  row that was just added, so the patient appears not to have been created.
+- **Don't navigate.** Creating a patient leaves you on the list with a line
+  naming them and an `.rh-link` to open their record — a provider adding
+  several in a row should not be thrown into the first one's record.
+
+A birth date in the future is refused client-side. The server takes any date;
+this is a typo every time, and cheaper to catch before it reaches a claim.
+
 ### Acting on a claim from History
 
 History reads the record; it does not edit it in place. The exception is
@@ -414,6 +435,25 @@ Irreversible actions sit in a `.submit-actions` block: set apart behind a
 rule, never flush against content someone was only reading. Amend rows default
 to **Keep** — dropping a code is an explicit choice, never implied by an empty
 field.
+
+**Only a `draft` claim can be deleted.** Once a payer has seen a claim it is
+the record of what was billed, and that is not ours to erase — so the option
+is not offered on it rather than offered and refused. The rule lives in
+`repository.deleteClaim`, not in the route or the button: `DELETE
+/api/claims/:claimId` only reports the refusal. A claim another claim was
+chained to is kept for the same reason — deleting it orphans the correction
+pointing at it.
+
+Deleting is two steps — a quiet **Delete draft claim**, then an explicit
+confirm naming the claim — and both live inside the *same* `.submit-actions`
+block as Submit, behind one rule rather than two. The confirm's destructive
+button is `.btn-destructive` (garnet outline), never `.btn-primary`: ruby is
+this app's "go ahead" colour, and nothing here should read as encouraged.
+Focus lands on **Keep it**.
+
+On Notion this is the trash, not an erase, so a misclick is still recoverable
+from the workspace — but the UI does not promise that, because the provider
+has no way to reach it.
 
 ### Color
 

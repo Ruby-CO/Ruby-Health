@@ -291,6 +291,12 @@
     }
     #startClaimBtn { align-self: flex-start; margin-top: 8px; }
 
+    .patients-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .patients-toolbar .row-input { flex: 1; margin-bottom: 0; }
+    .patients-toolbar .btn { flex: none; }
+    #addPatientForm { margin-bottom: 12px; }
+    .patients-form-actions { display: flex; gap: 8px; margin-top: 14px; }
+
     /* ---- Prepare claim: runs the whole pipeline in one step ---- */
     #prepareClaimBar {
       display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -375,6 +381,12 @@
     .btn:hover:not(:disabled) { background: var(--border-soft); }
     .btn-primary { border: none; background: var(--ruby); color: var(--cream); }
     .btn-primary:hover:not(:disabled) { background: var(--ruby-hover); }
+    /* Not btn-primary: ruby is this app's "go ahead" colour, and nothing here
+       should read as encouraged. Garnet on --card is 11.7:1. */
+    .btn-destructive { border-color: var(--garnet); color: var(--garnet); background: var(--card); }
+    .btn-destructive:hover:not(:disabled) { background: rgba(107, 15, 30, 0.06); }
+    .delete-claim { margin-top: 16px; }
+    .delete-confirm-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
     .icon-btn {
       width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--border); background: var(--card);
       color: var(--ink-2); display: flex; align-items: center; justify-content: center; flex: none; padding: 0;
@@ -803,7 +815,22 @@
     <div id="patientsView" class="route">
       <h1 class="page-title">Patients</h1>
       <div class="page-subtitle">Everyone on file, and the cases and visits filed under them.</div>
-      <input id="historyPatientSearch" class="row-input" type="text" placeholder="Search patients by name..." style="margin-bottom: 12px;" />
+      <div class="patients-toolbar">
+        <input id="historyPatientSearch" class="row-input" type="text" placeholder="Search patients by name..." />
+        <button id="addPatientToggleBtn" class="btn btn-primary" type="button" aria-expanded="false" aria-controls="addPatientForm">+ New patient</button>
+      </div>
+      <div id="addPatientForm" class="card" hidden>
+        <div class="section-title">New patient</div>
+        <div class="field-grid">
+          <label>Full name<input id="addPatientName" type="text" autocomplete="off" /></label>
+          <label>Date of birth<input id="addPatientDob" type="date" /></label>
+        </div>
+        <div class="patients-form-actions">
+          <button id="addPatientSaveBtn" class="btn btn-primary" type="button">Add patient</button>
+          <button id="addPatientCancelBtn" class="btn" type="button">Cancel</button>
+        </div>
+        <div id="addPatientStatus" class="status"></div>
+      </div>
       <div id="historyPatientList"></div>
     </div>
 
@@ -1170,6 +1197,97 @@
     historyPatientSearchEl.addEventListener("input", () => {
       renderRowCard(historyPatientListEl, filterHistoryPatients(), renderPatientRow, "No patients match your search.");
     });
+
+    const addPatientFormEl = document.getElementById("addPatientForm");
+    const addPatientToggleBtn = document.getElementById("addPatientToggleBtn");
+    const addPatientNameEl = document.getElementById("addPatientName");
+    const addPatientDobEl = document.getElementById("addPatientDob");
+    const addPatientSaveBtn = document.getElementById("addPatientSaveBtn");
+    const addPatientCancelBtn = document.getElementById("addPatientCancelBtn");
+    const addPatientStatusEl = document.getElementById("addPatientStatus");
+
+    function setAddPatientOpen(open) {
+      addPatientFormEl.hidden = !open;
+      addPatientToggleBtn.setAttribute("aria-expanded", String(open));
+      if (open) {
+        addPatientNameEl.focus();
+        return;
+      }
+      addPatientNameEl.value = "";
+      addPatientDobEl.value = "";
+      addPatientStatusEl.textContent = "";
+      addPatientStatusEl.className = "status";
+    }
+
+    function setAddPatientStatus(text, isError) {
+      addPatientStatusEl.textContent = text;
+      addPatientStatusEl.className = isError ? "status error" : "status";
+    }
+
+    addPatientToggleBtn.addEventListener("click", () => setAddPatientOpen(addPatientFormEl.hidden));
+    addPatientCancelBtn.addEventListener("click", () => setAddPatientOpen(false));
+
+    async function addPatient() {
+      const name = addPatientNameEl.value.trim();
+      const dateOfBirth = addPatientDobEl.value;
+      if (!name || !dateOfBirth) {
+        setAddPatientStatus("Enter a name and date of birth.", true);
+        return;
+      }
+      // The server takes any date. A birth date in the future is a typo every
+      // time, and it is cheaper to catch here than to explain on the claim.
+      if (dateOfBirth > new Date().toISOString().slice(0, 10)) {
+        setAddPatientStatus("That date of birth is in the future.", true);
+        return;
+      }
+
+      addPatientSaveBtn.disabled = true;
+      setAddPatientStatus("Adding patient...");
+      try {
+        const res = await fetch("/api/patients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, dateOfBirth }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setAddPatientStatus(data.error || "Could not add this patient.", true);
+          return;
+        }
+        setAddPatientOpen(false);
+        // A search still in the box would hide the row that was just added.
+        historyPatientSearchEl.value = "";
+        await loadHistoryPatients();
+        announcePatientAdded(data.patient);
+      } catch (err) {
+        setAddPatientStatus("Could not add this patient: " + err.message, true);
+      } finally {
+        addPatientSaveBtn.disabled = false;
+      }
+    }
+
+    // Says what happened and offers the obvious next step, without navigating
+    // on the provider's behalf -- they may be adding several at once.
+    function announcePatientAdded(patient) {
+      const note = document.createElement("div");
+      note.className = "status";
+      note.append(`Added ${patient.name} (${patient.patientId}). `);
+      note.appendChild(objectLink("Open their record", () => openHistoryPatient(patient)));
+      addPatientFormEl.insertAdjacentElement("afterend", note);
+      window.setTimeout(() => note.remove(), 12000);
+    }
+
+    addPatientSaveBtn.addEventListener("click", addPatient);
+    // Enter submits from either field: this is a two-field form and reaching
+    // for the mouse to save it is friction with no purpose.
+    for (const field of [addPatientNameEl, addPatientDobEl]) {
+      field.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          addPatient();
+        }
+      });
+    }
 
     const ORIGIN_LABELS = { patients: "Patients", history: "History" };
 
@@ -2886,10 +3004,104 @@
       return wrap;
     }
 
+    // Two steps, because there is no undo on the other side of this. The first
+    // button only asks; the second is the one that deletes.
+    function renderDeleteClaimAction(claim, reload) {
+      const wrap = document.createElement("div");
+      wrap.className = "delete-claim";
+
+      const status = document.createElement("div");
+      status.className = "status";
+
+      const ask = document.createElement("button");
+      ask.type = "button";
+      ask.className = "btn";
+      ask.textContent = "Delete draft claim";
+
+      const confirm = document.createElement("div");
+      confirm.className = "delete-confirm";
+      confirm.hidden = true;
+
+      const question = document.createElement("div");
+      question.className = "stedi-note";
+      question.textContent = `Delete ${claim.claimId}? It was never sent, so nothing reaches the payer -- but the draft goes for good, and the encounter it was built from stays.`;
+      confirm.appendChild(question);
+
+      const row = document.createElement("div");
+      row.className = "delete-confirm-row";
+
+      const yes = document.createElement("button");
+      yes.type = "button";
+      yes.className = "btn btn-destructive";
+      yes.textContent = "Delete it";
+
+      const no = document.createElement("button");
+      no.type = "button";
+      no.className = "btn";
+      no.textContent = "Keep it";
+
+      // Deliberately not btn-primary: ruby is this app's "do the thing"
+      // colour, and the encouraged action here is walking away.
+      no.addEventListener("click", () => {
+        confirm.hidden = true;
+        ask.hidden = false;
+        status.textContent = "";
+        status.className = "status";
+      });
+
+      ask.addEventListener("click", () => {
+        ask.hidden = true;
+        confirm.hidden = false;
+        no.focus();
+      });
+
+      yes.addEventListener("click", async () => {
+        yes.disabled = true;
+        no.disabled = true;
+        status.textContent = `Deleting ${claim.claimId}...`;
+        status.className = "status";
+        try {
+          const res = await fetch(`/api/claims/${encodeURIComponent(claim.claimId)}`, { method: "DELETE" });
+          const data = await res.json();
+          if (!res.ok) {
+            status.textContent = data.error || "Could not delete this claim.";
+            status.className = "status error";
+            yes.disabled = false;
+            no.disabled = false;
+            return;
+          }
+          // The card being read is the thing that just went away, so the list
+          // has to be the thing that redraws.
+          reload();
+        } catch (err) {
+          status.textContent = "Something went wrong: " + err.message;
+          status.className = "status error";
+          yes.disabled = false;
+          no.disabled = false;
+        }
+      });
+
+      row.appendChild(yes);
+      row.appendChild(no);
+      confirm.appendChild(row);
+
+      wrap.appendChild(ask);
+      wrap.appendChild(confirm);
+      wrap.appendChild(status);
+      return wrap;
+    }
+
     // One place decides what a claim can do, so a card never offers an action
     // its status cannot support.
     function renderClaimActions(claim, reload) {
-      return claim.status === "draft" ? renderSubmitClaimAction(claim, reload) : renderAmendClaimAction(claim, reload);
+      const actions =
+        claim.status === "draft" ? renderSubmitClaimAction(claim, reload) : renderAmendClaimAction(claim, reload);
+      // Only a draft is deletable. Once a payer has seen a claim it is the
+      // record of what was billed, so the option is not offered rather than
+      // offered and refused. It rides inside the same .submit-actions block:
+      // both are irreversible, and they belong behind one rule, not two.
+      if (claim.status === "draft") actions.appendChild(renderDeleteClaimAction(claim, reload));
+      return actions;
     }
 
     function renderClaimCard(claim, encounter, caseObj, reload) {

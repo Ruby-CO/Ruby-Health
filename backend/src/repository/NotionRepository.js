@@ -483,6 +483,39 @@ export class NotionRepository extends Repository {
     return parseClaim(updated);
   }
 
+  // A draft was never filed, so throwing it away costs nothing. Anything the
+  // payer has seen is the billing record and stays -- as does any claim a
+  // correction was chained to, which deleting would orphan.
+  //
+  // Notion's trash, not an erase: a claim deleted by a misclick is still
+  // recoverable from the workspace for 30 days.
+  async deleteClaim(claimId) {
+    this._requireClaimsDataSource();
+    const page = await this._findByTitle(this.claimsDataSourceId, "claim_id", claimId);
+    if (!page) throw new NotionRepositoryError(`No claim found with claim_id '${claimId}'.`);
+
+    const claim = parseClaim(page);
+    if (claim.status !== "draft") {
+      throw new NotionRepositoryError(
+        `Claim '${claimId}' is ${claim.status}, not a draft. A claim the payer has seen is the record of what was billed and cannot be deleted.`,
+      );
+    }
+
+    const children = await this._queryAll(this.claimsDataSourceId, {
+      property: "parent_claim_id",
+      rich_text: { equals: claimId },
+    });
+    if (children.length > 0) {
+      const ids = children.map((child) => parseClaim(child).claimId).join(", ");
+      throw new NotionRepositoryError(
+        `Claim '${claimId}' cannot be deleted because ${ids} ${children.length === 1 ? "was" : "were"} filed against it.`,
+      );
+    }
+
+    await this.client.pages.update({ page_id: page.id, in_trash: true });
+    return claim;
+  }
+
   async listClaimsForEncounter(encounterId) {
     this._requireClaimsDataSource();
     const pages = await this._queryAll(this.claimsDataSourceId, {
