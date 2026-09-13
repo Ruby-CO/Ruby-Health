@@ -149,6 +149,41 @@ async function persistArtifact(encounterId, stage, content) {
   }
 }
 
+// What the stored rows already know about a visit, for populateClaim. Best
+// effort on purpose: populate runs before an encounter exists on the New Claim
+// path, and a lookup that fails should cost a placeholder and a warning on the
+// claim -- which populateClaim adds -- not a failed stage. Unlike a failed
+// save, this degradation is visible: the claim says which fields it invented.
+async function buildClaimContext(encounterId) {
+  if (!repository || !encounterId) return {};
+  try {
+    const encounter = await repository.getEncounter(encounterId);
+    if (!encounter) return {};
+    const patient = encounter.patientId ? await repository.getPatient(encounter.patientId) : null;
+    return {
+      dateOfService: encounter.occurredAt || undefined,
+      patient: patient ? { name: patient.name, dateOfBirth: patient.dateOfBirth } : undefined,
+    };
+  } catch (err) {
+    console.error(`Reading claim context for encounter '${encounterId}' failed:`, err);
+    return {};
+  }
+}
+
+// The encounter's newest draft claim, or null. A submitted claim needs its own
+// id before it is mapped for the payer, and persistSubmittedClaim needs the
+// same row afterwards.
+async function findDraftClaim(encounterId) {
+  if (!repository || !encounterId) return null;
+  try {
+    const claims = await repository.listClaimsForEncounter(encounterId);
+    return [...claims].reverse().find((c) => c.status === "draft") || null;
+  } catch (err) {
+    console.error(`Looking up the draft claim for encounter '${encounterId}' failed:`, err);
+    return null;
+  }
+}
+
 // A provider recording a visit shouldn't have to know who the patient is
 // before they can start talking -- extraction can run, and the encounter
 // still needs to land somewhere real. Every such encounter files under one
@@ -799,7 +834,8 @@ app.post("/api/populate-claim", async (req, res) => {
 
   try {
     const providerProfile = getProviderProfile(providerId || DEFAULT_PROVIDER_ID);
-    const claim = populateClaim(facts, codes, providerProfile);
+    const context = await buildClaimContext(encounterId);
+    const claim = populateClaim(facts, codes, providerProfile, context);
     await persistArtifact(encounterId, "claim", claim);
     await persistClaimDraft(encounterId, claim);
     res.json({ claim });
@@ -890,6 +926,17 @@ app.post("/api/submit-claim", async (req, res) => {
     return res.status(500).json({
       error: "STEDI_API_KEY is not configured on the server. Add it to backend/.env and restart.",
     });
+  }
+
+  // The payer echoes CLP01 back on the remittance, so whatever goes out as the
+  // claim control number is the only thread tying an 835 to the claim it
+  // answers. buildStediClaim falls back to a throwaway `ruby-<timestamp>` when
+  // the claim carries no id, which nothing can match later -- so send the real
+  // one. Failing to find it degrades to that old behaviour rather than blocking
+  // the submission.
+  if (!claim.claimId) {
+    const draft = await findDraftClaim(encounterId);
+    if (draft) claim.claimId = draft.claimId;
   }
 
   let stediClaim;
