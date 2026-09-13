@@ -1,0 +1,126 @@
+name: Refresh data model
+
+# The button. Run it from the Actions tab -- Actions -> Refresh data model ->
+# "Run workflow" -- and pick the branch to read the code from.
+#
+# It regenerates docs/data/schema.mermaid and docs/data/schema-audit.md by
+# following .claude/agents/data-model.md, updates the Notion "Data Model" page,
+# and opens a pull request with the refreshed files.
+#
+# It opens a PR rather than pushing: master auto-deploys to Render on every
+# commit, so nothing lands there without a human. Notion is updated directly --
+# it is a reading surface, not a deploy target -- so the page can briefly be
+# ahead of master. The page header names the commit it was generated from, so
+# that is visible rather than silent.
+#
+# Nothing here runs on a schedule or on push. It runs when you click it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      publish_to_notion:
+        description: "Also update the Notion Data Model page"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: refresh-data-model
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Regenerate and publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      # The agent file is the single source of truth for how the audit is done.
+      # Pointing Claude at it rather than restating the instructions here means
+      # there is one copy to keep correct, not two that drift.
+      - name: Run the data-model audit
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          prompt: |
+            Read .claude/agents/data-model.md and follow it exactly, as if you
+            were that agent.
+
+            Regenerate docs/data/schema.mermaid and write docs/data/schema-audit.md
+            in full, from the code on this checkout.
+
+            Two things specific to running in CI:
+            - There is no backend/.env here and no Notion connection, so live
+              introspection is not available. Run in code-only mode and label the
+              audit header accordingly. Do not stall looking for credentials.
+            - Write the two files and stop. Do not run git, do not commit, do not
+              push, do not open a pull request. A later step does that.
+          claude_args: "--allowedTools Read,Glob,Grep,Bash,Write --max-turns 40"
+
+      - name: Did anything change?
+        id: diff
+        run: |
+          if git diff --quiet -- docs/data/; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "The regenerated docs match what is already committed."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            git diff --stat -- docs/data/
+          fi
+
+      - name: Open a pull request with the refreshed docs
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          BRANCH="chore/data-model-refresh"
+          SHORT_SHA="$(git rev-parse --short HEAD)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Reuse the same branch across runs so repeated clicks update one PR
+          # instead of piling up near-identical ones.
+          git checkout -B "$BRANCH"
+          git add docs/data/
+          git commit -m "Refresh the data-model docs from ${SHORT_SHA}"
+          git push --force-with-lease -u origin "$BRANCH"
+
+          if [ -z "$(gh pr list --head "$BRANCH" --state open --json number --jq '.[].number')" ]; then
+            gh pr create \
+              --base "${{ github.ref_name }}" \
+              --head "$BRANCH" \
+              --title "Refresh the data-model docs" \
+              --body "Regenerated from \`${SHORT_SHA}\` by the Refresh data model workflow.
+
+          Audit and diagram only -- no schema change. Read \`docs/data/schema-audit.md\` for what moved.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)"
+          else
+            echo "An open PR for $BRANCH already exists; it now carries the new commit."
+          fi
+
+      - name: Update the Notion Data Model page
+        if: inputs.publish_to_notion
+        working-directory: backend
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          # Not a secret -- access is controlled by the token, not the id. Set the
+          # repository variable only to point this at a different page.
+          NOTION_DATA_MODEL_PAGE_ID: ${{ vars.NOTION_DATA_MODEL_PAGE_ID || '3da4b1e5-9617-81a1-bedb-efab9e89be14' }}
+        run: |
+          npm ci
+          node scripts/publish-data-model.js
