@@ -1,0 +1,43 @@
+name: Schema docs
+
+# Deliberately not part of CI, and deliberately not on every commit.
+#
+# The `paths` filter means this workflow does not exist for the great majority
+# of changes -- it wakes up only when a commit touches the data model or the
+# docs that describe it. When it does wake up it asks one cheap question: did
+# the schema move without the generated docs being refreshed? No model is
+# called and nothing is regenerated; refreshing them is a human running the
+# data-model agent. See .github/scripts/check-schema-docs.mjs.
+on:
+  pull_request:
+    branches: [master]
+    # Repeated verbatim under `push` below: GitHub Actions rejects YAML
+    # anchors, so the two lists have to be kept in step by hand.
+    paths:
+      - "backend/src/repository/**"
+      - "backend/src/pipeline/**"
+      - "docs/data/**"
+  push:
+    branches: [master]
+    paths:
+      - "backend/src/repository/**"
+      - "backend/src/pipeline/**"
+      - "docs/data/**"
+
+jobs:
+  check:
+    name: Data-model docs up to date
+    runs-on: ubuntu-latest
+    steps:
+      # Full history: the check diffs a range, and a shallow clone has no base
+      # commit to diff against.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether the docs still describe the code
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node .github/scripts/check-schema-docs.mjs

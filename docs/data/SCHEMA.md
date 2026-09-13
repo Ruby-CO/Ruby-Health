@@ -207,3 +207,11 @@ is the point — but their absence is not news.
    There is no migration tooling; a migration here is a script someone runs
    once and watches.
 6. Re-run the `data-model` agent so the diagram and audit reflect the change.
+
+**CI will remind you about step 6.** A change under `backend/src/repository/`
+that does not also refresh `docs/data/` fails the *Schema docs* check on the
+pull request (`.github/workflows/schema-docs.yml`). It is a reminder, not a
+gate — it runs no model and regenerates nothing, and on master it reports
+without going red. A pipeline change alone leaves a note rather than a
+failure, because a file path cannot tell a renamed field from a reworded
+prompt.
