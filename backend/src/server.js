@@ -810,6 +810,20 @@ async function persistClaimDraft(encounterId, claim) {
   try {
     const artifact = await repository.getLatestArtifact(encounterId, "claim");
     if (!artifact) return;
+
+    // One visit, one draft. Walking back into the Claim step re-runs populate
+    // whenever the step's input changed, so filing a new row each time left an
+    // encounter holding several drafts for the same visit: History listed each
+    // as a separate claim, and submitting promoted only the newest -- leaving
+    // live-looking draft siblings on an encounter that had already been billed.
+    // Repointing the existing draft keeps it aimed at the artifact it was
+    // actually built from.
+    const draft = await findDraftClaim(encounterId);
+    if (draft) {
+      await repository.updateClaimArtifact(draft.claimId, artifact.artifactId);
+      return;
+    }
+
     await repository.createClaim({
       encounterId,
       artifactId: artifact.artifactId,

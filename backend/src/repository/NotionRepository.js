@@ -489,6 +489,47 @@ export class NotionRepository extends Repository {
   //
   // Notion's trash, not an erase: a claim deleted by a misclick is still
   // recoverable from the workspace for 30 days.
+  async updateClaimArtifact(claimId, artifactId) {
+    this._requireClaimsDataSource();
+    this._requireArtifactsDataSource();
+    if (!artifactId) throw new NotionRepositoryError("updateClaimArtifact requires an artifactId.");
+
+    const page = await this._findByTitle(this.claimsDataSourceId, "claim_id", claimId);
+    if (!page) throw new NotionRepositoryError(`No claim found with claim_id '${claimId}'.`);
+
+    const claim = parseClaim(page);
+    if (claim.status !== "draft") {
+      throw new NotionRepositoryError(
+        `Claim '${claimId}' is ${claim.status}, not a draft. The artifact a submitted claim points at is the record of what was billed and cannot be repointed.`,
+      );
+    }
+
+    // The artifact pointer is the audit trail -- it is what makes a claim
+    // resolve to the record it was built from. A pointer at another
+    // encounter's artifact would make the claim cite someone else's visit, so
+    // the pairing is checked rather than trusted.
+    const artifactPage = await this._findByTitle(this.artifactsDataSourceId, "artifact_id", artifactId);
+    if (!artifactPage) throw new NotionRepositoryError(`No artifact found with artifact_id '${artifactId}'.`);
+
+    const artifact = parseArtifact(artifactPage);
+    if (artifact.encounterId !== claim.encounterId) {
+      throw new NotionRepositoryError(
+        `Artifact '${artifactId}' belongs to encounter '${artifact.encounterId}', not to claim '${claimId}''s encounter '${claim.encounterId}'.`,
+      );
+    }
+    if (artifact.stage !== "claim") {
+      throw new NotionRepositoryError(
+        `Artifact '${artifactId}' is a '${artifact.stage}' artifact, not a claim.`,
+      );
+    }
+
+    const updated = await this.client.pages.update({
+      page_id: page.id,
+      properties: { artifact_id: { rich_text: [{ text: { content: artifactId } }] } },
+    });
+    return parseClaim(updated);
+  }
+
   async deleteClaim(claimId) {
     this._requireClaimsDataSource();
     const page = await this._findByTitle(this.claimsDataSourceId, "claim_id", claimId);
