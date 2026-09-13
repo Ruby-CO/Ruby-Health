@@ -135,21 +135,18 @@ export function populateClaim(facts, codes, providerProfile = null, context = {}
       }
     : { ...PLACEHOLDER_PATIENT };
 
+  // Only the anomalous case warns. Sex and member ID are invented on *every*
+  // claim -- the schema carries no coverage -- and a warning true of every
+  // claim is decoration, not a signal: it trains a reviewer to skim past the
+  // red box that sometimes means a denial. Those two are marked at the fields
+  // themselves in the claim form instead. A claim with no patient record at
+  // all is genuinely unusual, so that one still warns.
   if (!context.patient) {
     warnings.push({
       code: "PLACEHOLDER_PATIENT",
       message:
         "This claim is not attached to a patient record, so every subscriber field is a placeholder. " +
         "A real payer will reject it.",
-    });
-  } else {
-    // Fires on every claim built from a real patient, and should: the member ID
-    // going to the payer is invented. It stops firing when coverage is modelled.
-    warnings.push({
-      code: "PLACEHOLDER_COVERAGE",
-      message:
-        "Sex and member ID are placeholders -- Ruby does not store the patient's coverage yet. " +
-        "Fill them in before submitting to a real payer.",
     });
   }
 

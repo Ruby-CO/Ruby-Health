@@ -218,16 +218,32 @@ test("the patient name and date of birth come from the patient record", () => {
   assert.equal(claim.warnings.some((w) => w.code === "PLACEHOLDER_PATIENT"), false);
 });
 
-test("sex and member ID stay placeholders, and the claim admits it", () => {
-  // Deliberate: the schema carries no coverage, so these two are invented. The
-  // warning is what stops a claim looking complete when it is not -- it goes
-  // away when a Coverage entity exists, not before.
+test("sex and member ID stay placeholders, without warning on every claim", () => {
+  // The schema carries no coverage, so these two are invented on every claim.
+  // They are marked on their own field labels in the claim form rather than
+  // warned about -- a warning true of every claim is noise, and it would sit in
+  // the same red box as an actual denial risk.
   const claim = populateClaim(facts, oneCode, testProviderProfile, {
     patient: { name: "Molly Chen (synthetic)", dateOfBirth: "1990-04-12" },
   });
   assert.equal(claim.patient.sex, "U");
   assert.equal(claim.patient.memberId, "SAMPLE-0001");
-  assert.equal(claim.warnings.some((w) => w.code === "PLACEHOLDER_COVERAGE"), true);
+  // Names the regression it guards -- someone re-adding the blanket warning --
+  // rather than counting, which would break on any unrelated warning class.
+  assert.equal(claim.warnings.some((w) => w.code === "PLACEHOLDER_COVERAGE"), false);
+});
+
+test("a fully-specified claim carries exactly the warnings it should, and no others", () => {
+  // The one place "nothing unexpected appeared" is asserted. The linkage tests
+  // used to carry it as a side effect of counting every warning, which is what
+  // made them fail whenever an unrelated warning class was added. Keeping it
+  // here means a new warning class breaks one test with a readable set diff
+  // rather than four with "2 !== 0".
+  const claim = populateClaim(facts, twoProblemCodes, testProviderProfile, {
+    dateOfService: "2026-08-04",
+    patient: { name: "Molly Chen (synthetic)", dateOfBirth: "1990-04-12" },
+  });
+  assert.deepEqual(new Set(claim.warnings.map((w) => w.code)), new Set());
 });
 
 test("with no patient record every subscriber field is a flagged placeholder", () => {

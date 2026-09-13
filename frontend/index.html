@@ -4608,7 +4608,9 @@
     const CLAIM_GROUPS = [
       // Anything that would draw a denial goes above the form, not buried in it.
       { name: "warnings" },
-      { name: "patient", legend: "Patient (placeholder)" },
+      // Name and date of birth come from the patient record; only sex and
+      // member ID are invented, and they say so on their own labels.
+      { name: "patient", legend: "Patient" },
       { name: "provider", legend: "Provider (placeholder)" },
       { name: "payer", legend: "Payer (placeholder)" },
       { name: "clinical", legend: "Clinical summary" },
@@ -4668,8 +4670,8 @@
       claimFieldGrid(slots.patient, [
         ["Name", c.patient.name, (v) => (c.patient.name = v)],
         ["Date of birth", c.patient.dob, (v) => (c.patient.dob = v)],
-        ["Sex", c.patient.sex, (v) => (c.patient.sex = v)],
-        ["Member ID", c.patient.memberId, (v) => (c.patient.memberId = v)],
+        ["Sex (placeholder)", c.patient.sex, (v) => (c.patient.sex = v)],
+        ["Member ID (placeholder)", c.patient.memberId, (v) => (c.patient.memberId = v)],
       ], ws);
 
       // A real provider profile carries { address1, address2?, city, state,
