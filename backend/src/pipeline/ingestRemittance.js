@@ -71,8 +71,27 @@ export async function ingestRemittance({
   // A remittance document can cover several claims at once. Only the one this
   // was called for is filed; the count of the others is returned so a caller
   // handling a real multi-claim payload knows there is more to route.
+  //
+  // That is matched on CLP01 -- the control number Ruby sent on the 837P and
+  // the payer echoes back. Taking the first loop instead, which is what this
+  // did, files another claim's verdict, ICN and amounts onto this claim as
+  // soon as a document covers more than one.
   const parsedClaims = parseRemittance(remittance);
-  const adjudication = parsedClaims[0];
+  const matched = parsedClaims.find((c) => c.patientControlNumber === claimId);
+
+  // A single-claim document with no match is still filed: claims submitted
+  // before Ruby sent its own id went out as `ruby-<timestamp>`, and their
+  // remittances would otherwise become unfilable. With several claims and no
+  // match there is nothing to disambiguate on, and guessing is how the wrong
+  // claim gets marked paid -- so that refuses instead.
+  const adjudication = matched || (parsedClaims.length === 1 ? parsedClaims[0] : null);
+  if (!adjudication) {
+    throw new RemittanceIngestError(
+      `This remittance covers ${parsedClaims.length} claims and none of them carries the control number '${claimId}'. ` +
+        `Filing it against this claim would record another claim's outcome.`,
+      400
+    );
+  }
   const analysis = analyzeRemittance(adjudication, adjustmentCodes, { dateOfService, submittedClaim, today });
 
   // Keep the document itself, not just our reading of it -- if a future edge
