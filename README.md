@@ -26,10 +26,13 @@ The repo includes a Render blueprint (`render.yaml`) for a one-click deploy:
 
 1. Push this repo to your own GitHub account (or use this one) and sign in to [Render](https://render.com) with GitHub.
 2. **New > Blueprint**, pick this repo. Render reads `render.yaml` and provisions a free web service (`ruby-health-demo`) automatically — Node runtime, `backend` as the root dir, `npm install` / `npm start`.
-3. When prompted, set the `ANTHROPIC_API_KEY` secret (kept out of the blueprint on purpose — never commit it). `ANTHROPIC_MODEL` is already set to `claude-sonnet-5`.
+3. When prompted, set the `ANTHROPIC_API_KEY` secret (kept out of the blueprint on purpose — never commit it). `ANTHROPIC_MODEL` and `ANTHROPIC_UTILITY_MODEL` are pinned in `render.yaml` — read the values there rather than from a copy in this file, which is how the one that used to sit here went stale.
 4. Deploy. Render gives you a stable `https://ruby-health-demo.onrender.com`-style URL — that's the shareable link. A custom domain can be attached later from the same dashboard, no redeploy needed.
+5. For every deploy after that first one, add the service's **Deploy Hook** URL (Render → the service → Settings → Deploy Hook) to GitHub as an Actions secret named `RENDER_DEPLOY_HOOK_URL`. CI calls it once the tests pass, so a commit on `master` ships itself only when the suite is green. See "Deploys" in `CONTRIBUTING.md` for why deploys run from CI rather than from Render's own auto-deploy, which does not work for this service.
 
 Note: the free plan spins the service down after periods of inactivity, so the first request after a while can take ~30s to wake it back up — fine for demo sharing, worth a paid plan if that matters later.
+
+Note: the service already running at that URL was configured by hand and has drifted from `render.yaml` — it builds with `cd backend && npm install` from the repo root instead of the blueprint's `rootDir: backend`, and has no health check path set. Editing `render.yaml` does not change it; use the dashboard. The steps above still describe a correct fresh deploy.
 
 ### Status
 
