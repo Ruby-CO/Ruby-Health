@@ -67,3 +67,47 @@ jobs:
           done
           echo "Server did not become healthy within 10s"
           exit 1
+
+  # The browser smoke test is the only thing that checks the UI wiring: that a
+  # grounding verdict reaches the screen, that an edited quote drops its stale
+  # verdict, and that claim warnings sit above the form. It went unrun for
+  # long enough to drift against a removed button, which is why it is here now.
+  # Its own job, so a Chromium download never slows the backend suite down.
+  ui-smoke:
+    name: UI smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install
+        working-directory: backend
+        run: npm ci
+
+      # Playwright is deliberately not a project dependency. Installed at the
+      # repo root with no package.json changes -- root node_modules/ is
+      # gitignored -- which is where Node's ESM loader finds it from test/.
+      - name: Install Playwright
+        run: |
+          npm i --no-save --no-package-lock playwright@1.63.0
+          npx playwright install --with-deps chromium
+
+      # The test stubs every model-backed endpoint in the browser, so the
+      # server needs no API key.
+      - name: Run
+        env:
+          PORT: "3115"
+        run: |
+          node backend/src/server.js &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID 2>/dev/null' EXIT
+          for i in $(seq 1 20); do
+            curl -sf "http://127.0.0.1:3115/api/health" > /dev/null && break
+            sleep 0.5
+          done
+          node test/ui-smoke.mjs

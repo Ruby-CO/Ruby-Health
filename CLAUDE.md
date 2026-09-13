@@ -75,7 +75,8 @@ node --test reference/test/*.test.js    # 14 tests
 node eval/run.mjs --mock                # harness check, no API calls, free
 ```
 
-56 tests total. CI (`.github/workflows/ci.yml`) runs all four plus a boot check.
+56 tests total. CI (`.github/workflows/ci.yml`) runs all four plus a boot check,
+and runs `test/ui-smoke.mjs` in its own job — it drifted for months when nothing ran it.
 
 A root `package.json` would unify them, but Render builds the service with
 `cd backend && npm install` and reads config from the repo root — not worth
