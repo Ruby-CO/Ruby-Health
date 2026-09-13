@@ -6,16 +6,26 @@
 //
 // Model-backed endpoints are stubbed, so this exercises the UI, not the API.
 //
-// Run:  PORT=3115 node backend/src/server.js &
+// Run:  PORT=3115 node backend/src/server.js &   (no API key needed: the model endpoints are stubbed)
 //       node test/ui-smoke.mjs
 //
-// Playwright is not a project dependency -- this expects it available on the
-// machine (npm i -g playwright, or npx playwright).
+// Playwright is deliberately not a project dependency. Install it at the repo
+// root without touching any package.json -- Node's ESM loader does not look in
+// the global folder, so `npm i -g playwright` will not resolve from here:
+//
+//       npm i --no-save --no-package-lock playwright
+//       npx playwright install chromium
+//
+// The root node_modules/ is gitignored. On a machine that already has a
+// Chromium at a mismatched build, set PLAYWRIGHT_CHROMIUM_PATH to its binary
+// rather than downloading a second copy.
 
 import { chromium } from "playwright";
 
 const BASE = process.env.BASE_URL || "http://127.0.0.1:3115";
-const browser = await chromium.launch();
+const browser = await chromium.launch(
+  process.env.PLAYWRIGHT_CHROMIUM_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH } : {},
+);
 const page = await browser.newPage();
 const fails = [];
 const ok = (c, m) => { console.log((c ? "  ok   " : "  FAIL ") + m); if (!c) fails.push(m); };
@@ -66,16 +76,20 @@ await page.route("**/api/populate-claim", (r) => r.fulfill({
 
 await page.goto(BASE, { waitUntil: "domcontentloaded" });
 
+// There is no Extract button, and no button for any other stage: entering a
+// step runs the stage that fills it (see "Walking into a step runs it" in
+// CLAUDE.md). So the sidebar nav is how this test drives the pipeline -- the
+// same path a provider takes -- rather than a run-everything Prepare claim,
+// which would skip the cascade this is meant to exercise.
+const enterStep = (tab) => page.click(`.nav-item[data-tab="${tab}"]`);
+
 console.log("\n[ grounding badges ]");
 await page.fill("#transcript", "Patient reports a sore throat. No cough.");
-await page.click("#extractBtn");
-await page.waitForSelector(".quote-flag", { state: "attached", timeout: 8000 });
-// The action buttons deliberately never navigate, so move to Facts explicitly.
-await page.click('[data-tab="facts"]');
+await enterStep("facts");
 await page.waitForSelector(".quote-flag", { timeout: 8000 });
 const flags = await page.$$eval(".quote-flag", els => els.map(e => [e.className, e.textContent.trim()]));
 ok(flags.length === 3, `three quotes flagged (got ${flags.length})`);
-ok(flags[0][0].includes("verified") && flags[0][1].includes("In transcript"), "verbatim quote reads as in-transcript");
+ok(flags[0][0].includes("verified") && flags[0][1].includes("In context"), "verbatim quote reads as in-context");
 ok(flags[1][0].includes("paraphrased") && flags[1][1].includes("Paraphrased"), "reworded quote is labelled a paraphrase, not a quote");
 ok(flags[2][0].includes("unsupported") && flags[2][1].includes("Not found"), "unsupported quote is called out");
 
@@ -85,11 +99,11 @@ const after = await page.$eval(".quote-flag", e => [e.className, e.textContent.t
 ok(after[0].includes("unchecked") && after[1].includes("not re-checked"), "edited quote drops its old verdict");
 
 console.log("\n[ claim warnings ]");
-await page.click('[data-tab="codes"]');
-await page.click("#suggestCodesBtn");
+// The facts just changed, so Codes is stale and re-derives on entry; then the
+// codes are new, so Claim does the same. Each walk-in is the trigger.
+await enterStep("codes");
 await page.waitForSelector(".code-card", { timeout: 8000 });
-await page.click('[data-tab="claim"]');
-await page.click("#populateClaimBtn");
+await enterStep("claim");
 await page.waitForSelector(".claim-warning", { timeout: 8000 });
 const warn = await page.$eval(".claim-warning", e => e.textContent);
 ok(warn.includes("UNLINKED_SERVICE_LINE"), "unlinked service line is surfaced above the claim form");

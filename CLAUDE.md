@@ -51,7 +51,7 @@ caching.
 | `eval/` | Accuracy test suite: 20 synthetic encounters, a scorer, a runner. |
 | `reference/` | Loader for ICD-10/CPT code lists, used for validation. |
 | `docs/` | `mvp-v1-build-plan.html` — the P0–P6 build plan. |
-| `test/` | `ui-smoke.mjs`, a browser test. Needs Playwright, which is not a project dependency. |
+| `test/` | `ui-smoke.mjs`, a browser test. Needs Playwright, which is not a project dependency — install it at the repo root with `npm i --no-save --no-package-lock playwright` (a global install does not resolve from ESM). |
 
 **Watch out:** folders import across each other, and those paths are
 load-bearing. `eval/score.mjs` imports from `../backend/src/pipeline/`, and
@@ -75,7 +75,8 @@ node --test reference/test/*.test.js    # 14 tests
 node eval/run.mjs --mock                # harness check, no API calls, free
 ```
 
-56 tests total. CI (`.github/workflows/ci.yml`) runs all four plus a boot check.
+56 tests total. CI (`.github/workflows/ci.yml`) runs all four plus a boot check,
+and runs `test/ui-smoke.mjs` in its own job — it drifted for months when nothing ran it.
 
 A root `package.json` would unify them, but Render builds the service with
 `cd backend && npm install` and reads config from the repo root — not worth
