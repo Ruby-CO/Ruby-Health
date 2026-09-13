@@ -215,6 +215,10 @@ export function parseRemittance(remittance) {
   return claims.map((c) => {
     const everyAdjustment = [...c.claimAdjustments, ...c.lines.flatMap((l) => l.adjustments)];
     return {
+      // CLP01 -- the claim control number Ruby sent on the 837P, echoed back.
+      // It is what identifies which claim this remittance answers; dropping it
+      // here is why filing an 835 needed a human to name the claim.
+      patientControlNumber: c.patientControlNumber,
       payerClaimControlNumber: c.payerClaimControlNumber,
       claimStatusCode: c.claimStatusCode,
       status: resolveStatus(c.claimStatusCode, c.totals, everyAdjustment),

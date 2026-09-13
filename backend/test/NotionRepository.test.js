@@ -845,3 +845,101 @@ test("getDocument and listDocumentsForPatient read documents back", async () => 
 
   assert.equal(await repo.getDocument("D999"), null);
 });
+
+// --- updateClaimArtifact: one draft per visit, not one per populate ---------
+
+test("updateClaimArtifact repoints a draft at a newer artifact", async () => {
+  const repo = makeRepository();
+  const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);
+  const claim = await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer",
+    memberId: "SAMPLE-0001",
+  });
+
+  const newer = await repo.createArtifact({
+    encounterId: encounter.encounterId,
+    stage: "claim",
+    content: { serviceLines: [{ code: "99213", diagnosisPointers: "A" }] },
+    createdBy: "system",
+  });
+
+  const updated = await repo.updateClaimArtifact(claim.claimId, newer.artifactId);
+  assert.equal(updated.artifactId, newer.artifactId);
+  assert.equal(updated.claimId, claim.claimId);
+
+  // The point of the fix: still one claim on the encounter, not two.
+  const claims = await repo.listClaimsForEncounter(encounter.encounterId);
+  assert.equal(claims.length, 1);
+});
+
+for (const status of ["submitted", "accepted", "denied"]) {
+  test(`updateClaimArtifact refuses a ${status} claim`, async () => {
+    const repo = makeRepository();
+    const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);
+    const claim = await repo.createClaim({
+      encounterId: encounter.encounterId,
+      artifactId: artifact.artifactId,
+      claimType: "original",
+      payerName: "Sample Payer",
+      memberId: "SAMPLE-0001",
+    });
+    await repo.updateClaimStatus(claim.claimId, status);
+
+    const newer = await repo.createArtifact({
+      encounterId: encounter.encounterId,
+      stage: "claim",
+      content: { serviceLines: [] },
+      createdBy: "system",
+    });
+    await assert.rejects(() => repo.updateClaimArtifact(claim.claimId, newer.artifactId), NotionRepositoryError);
+  });
+}
+
+test("updateClaimArtifact refuses an artifact from another encounter", async () => {
+  // The artifact pointer is what makes a claim resolve to the record it was
+  // built from. Pointing it at another visit would make the claim cite someone
+  // else's encounter, and nothing downstream would notice.
+  const repo = makeRepository();
+  const mine = await makeEncounterWithClaimArtifact(repo);
+  const theirs = await makeEncounterWithClaimArtifact(repo);
+  const claim = await repo.createClaim({
+    encounterId: mine.encounter.encounterId,
+    artifactId: mine.artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer",
+    memberId: "SAMPLE-0001",
+  });
+
+  await assert.rejects(
+    () => repo.updateClaimArtifact(claim.claimId, theirs.artifact.artifactId),
+    NotionRepositoryError
+  );
+});
+
+test("updateClaimArtifact refuses an artifact that is not a claim", async () => {
+  const repo = makeRepository();
+  const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);
+  const claim = await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer",
+    memberId: "SAMPLE-0001",
+  });
+
+  const facts = await repo.createArtifact({
+    encounterId: encounter.encounterId,
+    stage: "facts",
+    content: { chiefComplaint: "Sore throat" },
+    createdBy: "system",
+  });
+  await assert.rejects(() => repo.updateClaimArtifact(claim.claimId, facts.artifactId), NotionRepositoryError);
+});
+
+test("updateClaimArtifact rejects an unknown claim id", async () => {
+  const repo = makeRepository();
+  await assert.rejects(() => repo.updateClaimArtifact("CL999", "A001"), NotionRepositoryError);
+});

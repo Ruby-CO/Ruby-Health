@@ -3418,6 +3418,20 @@
       claim: () => fingerprint({ facts: state.facts, codes: state.codes }),
     };
 
+    // A stage can succeed while the record it belongs to fails to save. That
+    // used to be invisible: the status line said Done and nothing had been
+    // written. A silent save on a medical record is worse than a slow one, so
+    // the failure takes over the status line rather than sitting in a log.
+    function reportPersistence(statusEl, data, doneText) {
+      if (data.persistence && data.persistence.saved === false) {
+        statusEl.textContent = data.persistence.message;
+        statusEl.className = "status error";
+        return;
+      }
+      statusEl.textContent = doneText;
+      statusEl.className = "status";
+    }
+
     function markDerived(stage) {
       state.derivedFrom = state.derivedFrom || {};
       state.derivedFrom[stage] = STAGE_INPUT[stage]();
@@ -3735,8 +3749,7 @@
           updatePatientCaseBar();
         }
 
-        extractStatusEl.textContent = "Done — see the Facts tab.";
-        extractStatusEl.className = "status";
+        reportPersistence(extractStatusEl, data, "Done — see the Facts tab.");
         renderNav();
         return true;
       } catch (err) {
@@ -4336,8 +4349,11 @@
         state.codes = Array.isArray(data.suggestions) ? data.suggestions : [];
         markDerived("codes");
         renderCodes(codesContainer, claimWorkspace);
-        codesStatusEl.textContent = state.codes.length ? "Done." : "No confident code suggestions — add some by hand below if you like.";
-        codesStatusEl.className = "status";
+        reportPersistence(
+          codesStatusEl,
+          data,
+          state.codes.length ? "Done." : "No confident code suggestions — add some by hand below if you like."
+        );
         renderNav();
         return true;
       } catch (err) {
@@ -4439,7 +4455,7 @@
           return false;
         }
 
-        claimStatusEl.textContent = "";
+        reportPersistence(claimStatusEl, data, "");
         state.claim = data.claim;
         markDerived("claim");
         state.reviewed = false;
@@ -4706,7 +4722,9 @@
     const CLAIM_GROUPS = [
       // Anything that would draw a denial goes above the form, not buried in it.
       { name: "warnings" },
-      { name: "patient", legend: "Patient (placeholder)" },
+      // Name and date of birth come from the patient record; only sex and
+      // member ID are invented, and they say so on their own labels.
+      { name: "patient", legend: "Patient" },
       { name: "provider", legend: "Provider (placeholder)" },
       { name: "payer", legend: "Payer (placeholder)" },
       { name: "clinical", legend: "Clinical summary" },
@@ -4766,8 +4784,8 @@
       claimFieldGrid(slots.patient, [
         ["Name", c.patient.name, (v) => (c.patient.name = v)],
         ["Date of birth", c.patient.dob, (v) => (c.patient.dob = v)],
-        ["Sex", c.patient.sex, (v) => (c.patient.sex = v)],
-        ["Member ID", c.patient.memberId, (v) => (c.patient.memberId = v)],
+        ["Sex (placeholder)", c.patient.sex, (v) => (c.patient.sex = v)],
+        ["Member ID (placeholder)", c.patient.memberId, (v) => (c.patient.memberId = v)],
       ], ws);
 
       // A real provider profile carries { address1, address2?, city, state,

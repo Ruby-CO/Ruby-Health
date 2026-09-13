@@ -333,3 +333,23 @@ test("rejects an X12 document that isn't an 835", () => {
   ].join("\n");
   assert.throws(() => parseRemittance(a277), RemittanceParseError);
 });
+
+// --- the key that ties a remittance back to its claim ------------------------
+
+test("the claim control number Ruby sent is returned, not discarded", () => {
+  // CLP01 is the one thread joining an 835 to the claim it answers. The parser
+  // read it and then dropped it from its own output, which is why filing a
+  // remittance needed a human to name the claim by hand.
+  const era = buildEra({ claims: [{ pcn: "CL014" }] });
+  const [claim] = parseRemittance(era);
+  assert.equal(claim.patientControlNumber, "CL014");
+});
+
+test("a multi-claim remittance keeps each claim's own control number", () => {
+  const era = buildEra({ claims: [{ pcn: "CL014" }, { pcn: "CL021" }] });
+  const claims = parseRemittance(era);
+  assert.deepEqual(
+    claims.map((c) => c.patientControlNumber),
+    ["CL014", "CL021"]
+  );
+});

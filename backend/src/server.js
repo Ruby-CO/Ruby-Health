@@ -14,6 +14,7 @@ import { buildCorrectedClaim, CorrectedClaimError } from "./pipeline/buildCorrec
 import { submitToStedi, StediSubmissionError } from "./pipeline/submitToStedi.js";
 import { annotateValidation, unrecognisedCodes } from "./pipeline/validateCodes.js";
 import { usageTotals } from "./usage.js";
+import { persistenceFailure } from "./persistence.js";
 import { loadCodeSet } from "../../reference/loadCodes.mjs";
 import { createNotionRepositoryFromEnv, createBlobStoreFromEnv, NotionRepositoryError } from "./repository/index.js";
 import { RemittanceParseError } from "./pipeline/parseRemittance.js";
@@ -137,15 +138,58 @@ function requireRepository(res) {
   return false;
 }
 
-// Best-effort: a persistence hiccup shouldn't take down a pipeline stage the
-// provider is actively watching. Logged, not surfaced, the same way code
-// validation warns instead of blocking.
+// Best-effort, and it says so. A persistence hiccup shouldn't take down a
+// pipeline stage the provider is actively watching -- but it must not be
+// reported as success either, which is what swallowing the error did: the
+// stage ticked green and the visit's record had a hole in it that nothing in
+// the UI mentioned.
+//
+// Returns null when persistence was never attempted (no repository configured,
+// or no encounter yet). That is not a failure and must not warn.
 async function persistArtifact(encounterId, stage, content) {
-  if (!repository || !encounterId) return;
+  if (!repository || !encounterId) return null;
   try {
     await repository.createArtifact({ encounterId, stage, content, createdBy: "system" });
+    return { stage, saved: true };
   } catch (err) {
     console.error(`Persisting '${stage}' artifact for encounter '${encounterId}' failed:`, err);
+    return { stage, saved: false };
+  }
+}
+
+
+// What the stored rows already know about a visit, for populateClaim. Best
+// effort on purpose: populate runs before an encounter exists on the New Claim
+// path, and a lookup that fails should cost a placeholder and a warning on the
+// claim -- which populateClaim adds -- not a failed stage. Unlike a failed
+// save, this degradation is visible: the claim says which fields it invented.
+async function buildClaimContext(encounterId) {
+  if (!repository || !encounterId) return {};
+  try {
+    const encounter = await repository.getEncounter(encounterId);
+    if (!encounter) return {};
+    const patient = encounter.patientId ? await repository.getPatient(encounter.patientId) : null;
+    return {
+      dateOfService: encounter.occurredAt || undefined,
+      patient: patient ? { name: patient.name, dateOfBirth: patient.dateOfBirth } : undefined,
+    };
+  } catch (err) {
+    console.error(`Reading claim context for encounter '${encounterId}' failed:`, err);
+    return {};
+  }
+}
+
+// The encounter's newest draft claim, or null. A submitted claim needs its own
+// id before it is mapped for the payer, and persistSubmittedClaim needs the
+// same row afterwards.
+async function findDraftClaim(encounterId) {
+  if (!repository || !encounterId) return null;
+  try {
+    const claims = await repository.listClaimsForEncounter(encounterId);
+    return [...claims].reverse().find((c) => c.status === "draft") || null;
+  } catch (err) {
+    console.error(`Looking up the draft claim for encounter '${encounterId}' failed:`, err);
+    return null;
   }
 }
 
@@ -700,10 +744,12 @@ app.post("/api/extract", async (req, res) => {
       if (autoProvisioned) effectiveEncounterId = autoProvisioned.encounter.encounterId;
     }
 
-    await persistArtifact(effectiveEncounterId, "transcript", { transcript });
-    await persistArtifact(effectiveEncounterId, "facts", facts);
+    const persistence = persistenceFailure(
+      await persistArtifact(effectiveEncounterId, "transcript", { transcript }),
+      await persistArtifact(effectiveEncounterId, "facts", facts)
+    );
 
-    res.json({ facts, encounterId: effectiveEncounterId || null, autoProvisioned });
+    res.json({ facts, encounterId: effectiveEncounterId || null, autoProvisioned, persistence });
   } catch (err) {
     console.error("Extraction failed:", err);
     res.status(502).json({ error: "Extraction failed. See server logs for details." });
@@ -754,9 +800,9 @@ app.post("/api/suggest-codes", async (req, res) => {
       console.log(JSON.stringify({ type: "validation", unrecognised }));
     }
 
-    await persistArtifact(encounterId, "codes", suggestions);
+    const persistence = persistenceFailure(await persistArtifact(encounterId, "codes", suggestions));
 
-    res.json({ suggestions });
+    res.json({ suggestions, persistence });
   } catch (err) {
     console.error("Code suggestion failed:", err);
     res.status(502).json({ error: "Code suggestion failed. See server logs for details." });
@@ -775,6 +821,20 @@ async function persistClaimDraft(encounterId, claim) {
   try {
     const artifact = await repository.getLatestArtifact(encounterId, "claim");
     if (!artifact) return;
+
+    // One visit, one draft. Walking back into the Claim step re-runs populate
+    // whenever the step's input changed, so filing a new row each time left an
+    // encounter holding several drafts for the same visit: History listed each
+    // as a separate claim, and submitting promoted only the newest -- leaving
+    // live-looking draft siblings on an encounter that had already been billed.
+    // Repointing the existing draft keeps it aimed at the artifact it was
+    // actually built from.
+    const draft = await findDraftClaim(encounterId);
+    if (draft) {
+      await repository.updateClaimArtifact(draft.claimId, artifact.artifactId);
+      return;
+    }
+
     await repository.createClaim({
       encounterId,
       artifactId: artifact.artifactId,
@@ -799,10 +859,11 @@ app.post("/api/populate-claim", async (req, res) => {
 
   try {
     const providerProfile = getProviderProfile(providerId || DEFAULT_PROVIDER_ID);
-    const claim = populateClaim(facts, codes, providerProfile);
-    await persistArtifact(encounterId, "claim", claim);
+    const context = await buildClaimContext(encounterId);
+    const claim = populateClaim(facts, codes, providerProfile, context);
+    const persistence = persistenceFailure(await persistArtifact(encounterId, "claim", claim));
     await persistClaimDraft(encounterId, claim);
-    res.json({ claim });
+    res.json({ claim, persistence });
   } catch (err) {
     if (err instanceof ClaimError) {
       return res.status(400).json({ error: err.message });
@@ -890,6 +951,17 @@ app.post("/api/submit-claim", async (req, res) => {
     return res.status(500).json({
       error: "STEDI_API_KEY is not configured on the server. Add it to backend/.env and restart.",
     });
+  }
+
+  // The payer echoes CLP01 back on the remittance, so whatever goes out as the
+  // claim control number is the only thread tying an 835 to the claim it
+  // answers. buildStediClaim falls back to a throwaway `ruby-<timestamp>` when
+  // the claim carries no id, which nothing can match later -- so send the real
+  // one. Failing to find it degrades to that old behaviour rather than blocking
+  // the submission.
+  if (!claim.claimId) {
+    const draft = await findDraftClaim(encounterId);
+    if (draft) claim.claimId = draft.claimId;
   }
 
   let stediClaim;

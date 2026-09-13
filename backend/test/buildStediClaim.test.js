@@ -111,7 +111,9 @@ test("an unlinked service line falls back to the principal diagnosis so it still
     ],
     testProviderProfile
   );
-  assert.equal(claim.warnings.length, 1); // populateClaim already flagged this
+  // populateClaim already flagged this. Count only the linkage warning -- the
+  // placeholder-patient and assumed-date warnings are not what this asserts.
+  assert.equal(claim.warnings.filter((w) => w.code === "UNLINKED_SERVICE_LINE").length, 1);
 
   const stediClaim = buildStediClaim(claim);
   const line = stediClaim.claimInformation.serviceLines[0];
@@ -150,6 +152,15 @@ test("rejects a claim with no service lines", () => {
     () => buildStediClaim({ diagnoses: [{ pointer: "A", code: "J02.9" }], serviceLines: [] }),
     StediMappingError
   );
+});
+
+test("a claim's own id goes out as the payer's claim control number", () => {
+  // Without this the claim went out as `ruby-<timestamp>`, and the number the
+  // payer echoes back on the remittance matched nothing Ruby had stored.
+  const claim = populateClaim(facts, codes, testProviderProfile);
+  claim.claimId = "CL014";
+  const stediClaim = buildStediClaim(claim);
+  assert.equal(stediClaim.claimInformation.patientControlNumber, "CL014");
 });
 
 test("the billing provider the payer sees is the organization, not the clinician", () => {

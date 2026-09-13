@@ -4,6 +4,18 @@
 // CMS-1500 box 21 carries at most twelve diagnoses, pointered A through L.
 const MAX_DIAGNOSES = 12;
 
+// The subscriber details a claim carries when nothing better is available.
+// Name and date of birth are filled from the Patient row whenever the claim is
+// populated from a real encounter; sex and member ID have nowhere to come from
+// -- the schema carries no coverage -- so they stay canned, and the claim says
+// so rather than looking complete.
+const PLACEHOLDER_PATIENT = {
+  name: "Sample Patient (synthetic)",
+  dob: "1990-01-01",
+  sex: "U",
+  memberId: "SAMPLE-0001",
+};
+
 export class ClaimError extends Error {
   constructor(message) {
     super(message);
@@ -30,8 +42,14 @@ function normalizeCode(code) {
  *   When null, the claim is populated with a clearly-labeled placeholder
  *   provider and a warning -- a claim never silently carries a fake NPI
  *   without saying so.
+ * @param {object} [context] What the stored rows already know about this visit:
+ *   `{ dateOfService, patient: { name, dateOfBirth } }`. Every field is
+ *   optional -- populate can run before an encounter exists -- and each one
+ *   missing costs a warning rather than a silent placeholder, on the same
+ *   principle as the provider profile above. The lookup belongs to the caller:
+ *   this stage stays deterministic and does no I/O.
  */
-export function populateClaim(facts, codes, providerProfile = null) {
+export function populateClaim(facts, codes, providerProfile = null, context = {}) {
   const diagnosisCodes = codes.filter((c) => c.codeType === "ICD-10");
 
   if (diagnosisCodes.length > MAX_DIAGNOSES) {
@@ -98,6 +116,40 @@ export function populateClaim(facts, codes, providerProfile = null) {
       };
     });
 
+  // The visit's own date, not the day someone got round to drafting the claim.
+  const dateOfService = context.dateOfService || new Date().toISOString().slice(0, 10);
+  if (!context.dateOfService) {
+    warnings.push({
+      code: "DATE_OF_SERVICE_ASSUMED",
+      message:
+        "No encounter date was available, so the date of service is today. A claim billed with the " +
+        "wrong service date is denied -- check it against the visit before submitting.",
+    });
+  }
+
+  const patient = context.patient
+    ? {
+        ...PLACEHOLDER_PATIENT,
+        name: context.patient.name || PLACEHOLDER_PATIENT.name,
+        dob: context.patient.dateOfBirth || PLACEHOLDER_PATIENT.dob,
+      }
+    : { ...PLACEHOLDER_PATIENT };
+
+  // Only the anomalous case warns. Sex and member ID are invented on *every*
+  // claim -- the schema carries no coverage -- and a warning true of every
+  // claim is decoration, not a signal: it trains a reviewer to skim past the
+  // red box that sometimes means a denial. Those two are marked at the fields
+  // themselves in the claim form instead. A claim with no patient record at
+  // all is genuinely unusual, so that one still warns.
+  if (!context.patient) {
+    warnings.push({
+      code: "PLACEHOLDER_PATIENT",
+      message:
+        "This claim is not attached to a patient record, so every subscriber field is a placeholder. " +
+        "A real payer will reject it.",
+    });
+  }
+
   if (!providerProfile) {
     warnings.push({
       code: "NO_PROVIDER_PROFILE",
@@ -108,12 +160,7 @@ export function populateClaim(facts, codes, providerProfile = null) {
   }
 
   return {
-    patient: {
-      name: "Sample Patient (synthetic)",
-      dob: "1990-01-01",
-      sex: "U",
-      memberId: "SAMPLE-0001",
-    },
+    patient,
     // Hardwired for the MVP demo: both name and NPI are values Stedi's
     // sandbox actually accepts, not obviously-fake placeholders. This path
     // only runs when no provider profile is configured at all -- with
@@ -132,7 +179,7 @@ export function populateClaim(facts, codes, providerProfile = null) {
       name: "Sample Payer Insurance",
       payerId: "00000",
     },
-    dateOfService: new Date().toISOString().slice(0, 10),
+    dateOfService,
     chiefComplaint: facts.chiefComplaint || "",
     medicalNecessityNotes: Array.isArray(facts.medicalNecessityLanguage)
       ? facts.medicalNecessityLanguage.join("\n")

@@ -131,6 +131,16 @@ export class Repository {
     throw new NotImplementedError("updateClaimStatus");
   }
 
+  /** Repoints a draft claim at a newer artifact, for when the claim is
+   *  populated again from the same encounter. Only a `draft` moves: once the
+   *  payer has seen a claim, the artifact it points at is the record of what
+   *  was billed, and repointing it would rewrite that history. The artifact
+   *  must belong to the same encounter as the claim.
+   *  @returns {Promise<object>} the Claim, pointing at the new artifact */
+  async updateClaimArtifact(_claimId, _artifactId) {
+    throw new NotImplementedError("updateClaimArtifact");
+  }
+
   /** @returns {Promise<object[]>} every Claim attached to an encounter
    *  (original, corrected, secondary alike), oldest first */
   async listClaimsForEncounter(_encounterId) {
