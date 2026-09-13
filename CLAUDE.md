@@ -51,7 +51,7 @@ caching.
 | `eval/` | Accuracy test suite: 20 synthetic encounters, a scorer, a runner. |
 | `reference/` | Loader for ICD-10/CPT code lists, used for validation. |
 | `docs/` | `mvp-v1-build-plan.html` — the P0–P6 build plan. |
-| `test/` | `ui-smoke.mjs`, a browser test. Needs Playwright, which is not a project dependency. |
+| `test/` | `ui-smoke.mjs`, a browser test. Needs Playwright, which is not a project dependency — install it at the repo root with `npm i --no-save --no-package-lock playwright` (a global install does not resolve from ESM). |
 
 **Watch out:** folders import across each other, and those paths are
 load-bearing. `eval/score.mjs` imports from `../backend/src/pipeline/`, and
