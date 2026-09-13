@@ -291,6 +291,12 @@
     }
     #startClaimBtn { align-self: flex-start; margin-top: 8px; }
 
+    .patients-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
+    .patients-toolbar .row-input { flex: 1; margin-bottom: 0; }
+    .patients-toolbar .btn { flex: none; }
+    #addPatientForm { margin-bottom: 12px; }
+    .patients-form-actions { display: flex; gap: 8px; margin-top: 14px; }
+
     /* ---- Prepare claim: runs the whole pipeline in one step ---- */
     #prepareClaimBar {
       display: flex; align-items: center; justify-content: space-between; gap: 16px;
@@ -809,7 +815,22 @@
     <div id="patientsView" class="route">
       <h1 class="page-title">Patients</h1>
       <div class="page-subtitle">Everyone on file, and the cases and visits filed under them.</div>
-      <input id="historyPatientSearch" class="row-input" type="text" placeholder="Search patients by name..." style="margin-bottom: 12px;" />
+      <div class="patients-toolbar">
+        <input id="historyPatientSearch" class="row-input" type="text" placeholder="Search patients by name..." />
+        <button id="addPatientToggleBtn" class="btn btn-primary" type="button" aria-expanded="false" aria-controls="addPatientForm">+ New patient</button>
+      </div>
+      <div id="addPatientForm" class="card" hidden>
+        <div class="section-title">New patient</div>
+        <div class="field-grid">
+          <label>Full name<input id="addPatientName" type="text" autocomplete="off" /></label>
+          <label>Date of birth<input id="addPatientDob" type="date" /></label>
+        </div>
+        <div class="patients-form-actions">
+          <button id="addPatientSaveBtn" class="btn btn-primary" type="button">Add patient</button>
+          <button id="addPatientCancelBtn" class="btn" type="button">Cancel</button>
+        </div>
+        <div id="addPatientStatus" class="status"></div>
+      </div>
       <div id="historyPatientList"></div>
     </div>
 
@@ -1176,6 +1197,97 @@
     historyPatientSearchEl.addEventListener("input", () => {
       renderRowCard(historyPatientListEl, filterHistoryPatients(), renderPatientRow, "No patients match your search.");
     });
+
+    const addPatientFormEl = document.getElementById("addPatientForm");
+    const addPatientToggleBtn = document.getElementById("addPatientToggleBtn");
+    const addPatientNameEl = document.getElementById("addPatientName");
+    const addPatientDobEl = document.getElementById("addPatientDob");
+    const addPatientSaveBtn = document.getElementById("addPatientSaveBtn");
+    const addPatientCancelBtn = document.getElementById("addPatientCancelBtn");
+    const addPatientStatusEl = document.getElementById("addPatientStatus");
+
+    function setAddPatientOpen(open) {
+      addPatientFormEl.hidden = !open;
+      addPatientToggleBtn.setAttribute("aria-expanded", String(open));
+      if (open) {
+        addPatientNameEl.focus();
+        return;
+      }
+      addPatientNameEl.value = "";
+      addPatientDobEl.value = "";
+      addPatientStatusEl.textContent = "";
+      addPatientStatusEl.className = "status";
+    }
+
+    function setAddPatientStatus(text, isError) {
+      addPatientStatusEl.textContent = text;
+      addPatientStatusEl.className = isError ? "status error" : "status";
+    }
+
+    addPatientToggleBtn.addEventListener("click", () => setAddPatientOpen(addPatientFormEl.hidden));
+    addPatientCancelBtn.addEventListener("click", () => setAddPatientOpen(false));
+
+    async function addPatient() {
+      const name = addPatientNameEl.value.trim();
+      const dateOfBirth = addPatientDobEl.value;
+      if (!name || !dateOfBirth) {
+        setAddPatientStatus("Enter a name and date of birth.", true);
+        return;
+      }
+      // The server takes any date. A birth date in the future is a typo every
+      // time, and it is cheaper to catch here than to explain on the claim.
+      if (dateOfBirth > new Date().toISOString().slice(0, 10)) {
+        setAddPatientStatus("That date of birth is in the future.", true);
+        return;
+      }
+
+      addPatientSaveBtn.disabled = true;
+      setAddPatientStatus("Adding patient...");
+      try {
+        const res = await fetch("/api/patients", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, dateOfBirth }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setAddPatientStatus(data.error || "Could not add this patient.", true);
+          return;
+        }
+        setAddPatientOpen(false);
+        // A search still in the box would hide the row that was just added.
+        historyPatientSearchEl.value = "";
+        await loadHistoryPatients();
+        announcePatientAdded(data.patient);
+      } catch (err) {
+        setAddPatientStatus("Could not add this patient: " + err.message, true);
+      } finally {
+        addPatientSaveBtn.disabled = false;
+      }
+    }
+
+    // Says what happened and offers the obvious next step, without navigating
+    // on the provider's behalf -- they may be adding several at once.
+    function announcePatientAdded(patient) {
+      const note = document.createElement("div");
+      note.className = "status";
+      note.append(`Added ${patient.name} (${patient.patientId}). `);
+      note.appendChild(objectLink("Open their record", () => openHistoryPatient(patient)));
+      addPatientFormEl.insertAdjacentElement("afterend", note);
+      window.setTimeout(() => note.remove(), 12000);
+    }
+
+    addPatientSaveBtn.addEventListener("click", addPatient);
+    // Enter submits from either field: this is a two-field form and reaching
+    // for the mouse to save it is friction with no purpose.
+    for (const field of [addPatientNameEl, addPatientDobEl]) {
+      field.addEventListener("keydown", (e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          addPatient();
+        }
+      });
+    }
 
     const ORIGIN_LABELS = { patients: "Patients", history: "History" };
 
