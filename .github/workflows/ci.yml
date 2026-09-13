@@ -111,3 +111,41 @@ jobs:
             sleep 0.5
           done
           node test/ui-smoke.mjs
+
+  # Render's own auto-deploy has never fired for this service: the setting is
+  # on, GitHub delivers the push event (this workflow is the proof -- it runs
+  # on the same event), and Render does not react. Reconnecting the repo in the
+  # dashboard did not change that. So the deploy is driven from here instead.
+  #
+  # This is the better arrangement anyway: master deploys only after the suite
+  # is green, rather than on any push that happens to land.
+  deploy:
+    name: Deploy to Render
+    needs: [test, ui-smoke]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Render deploy
+        env:
+          HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          # Skips rather than fails when the secret is absent, so adding this
+          # workflow cannot turn master red before the secret is in place.
+          if [ -z "$HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL is not set -- nothing to deploy to."
+            echo "Add it under Settings > Secrets and variables > Actions."
+            exit 0
+          fi
+
+          STATUS=$(curl -sS -X POST -o /tmp/render-response -w '%{http_code}' "$HOOK_URL")
+          cat /tmp/render-response
+          echo
+
+          # A deploy hook that quietly 404s looks identical to a working one
+          # unless the status code is checked, which is how a broken deploy
+          # path stays broken for weeks.
+          if [ "$STATUS" -ge 300 ]; then
+            echo "Render deploy hook returned HTTP $STATUS"
+            exit 1
+          fi
+          echo "Render deploy triggered."
