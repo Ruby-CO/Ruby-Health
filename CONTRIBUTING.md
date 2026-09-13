@@ -37,6 +37,19 @@ that. If that webhook is ever repaired, switch auto-deploy off in Render
 rather than leaving both paths live, or a commit deploys twice: once on the
 push and once on green.
 
+**This has already been tried once.** On 13 Sep 2026, within an hour of the
+paragraph above being written, the webhook was re-added in GitHub to get
+automatic deploys back — not knowing the CI hook already provided them. Render's
+auto-deploy was switched off again the same day and the arrangement left as
+described here.
+
+Worth knowing before switching it on a third time, because the reasoning is
+not obvious from the dashboard: a disabled auto-deploy setting looks like
+something nobody got round to, and turning it on *feels* like a fix. Deploys
+are already automatic. What the setting would add is a second deploy that
+fires on the push, before the tests finish — so a commit that breaks the suite
+would reach the live site, which is exactly what the CI hook exists to prevent.
+
 Deploying only on a green suite is the stronger arrangement regardless — a
 broken commit leaves the live site on the last good version instead of taking
 it down — but it is still not what production needs.
