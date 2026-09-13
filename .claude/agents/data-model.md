@@ -227,5 +227,14 @@ Close your report to the caller with:
 - the explicit note: **no schema changes were made; everything above is a
   proposal awaiting approval.**
 
-Do not commit. Do not push. Do not open a PR. The person who invoked you
-decides what happens next.
+Do not commit. Do not push. Do not open a PR. Do not publish to Notion — your
+Notion access is read-only by design. The person or workflow that invoked you
+decides what happens next, and publishing is their step:
+
+- In a Claude Code session, the caller mirrors your output to the Notion **Data
+  Model** page (`docs/data/` → the page, via `backend/scripts/publish-data-model.js`
+  or the Notion connector).
+- In CI, `.github/workflows/refresh-data-model.yml` runs that script and opens a
+  pull request with your two files.
+
+Neither happens unless someone asks for it.
