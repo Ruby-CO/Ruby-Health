@@ -45,6 +45,10 @@
     #appRail {
       width: 72px; flex: none; background: var(--plum); display: flex; flex-direction: column;
       align-items: center; gap: 6px; padding: 18px 0;
+      /* Sticky for the same reason #sidebar is: the rail ends in the provider
+         chip, and on a page taller than the window a chip anchored to the
+         bottom of the document is a chip you have to go looking for. */
+      position: sticky; top: 0; height: 100vh;
     }
     .rail-item {
       display: flex; flex-direction: column; align-items: center; gap: 5px; width: 58px; padding: 9px 4px 8px;
@@ -54,13 +58,36 @@
     .rail-item.active { background: rgba(255, 255, 255, 0.14); color: var(--cream); }
     .rail-item svg { flex: none; }
 
+    /* The provider chip is the account affordance, not a fourth destination in
+       the list, so it sits at the far end behind a rule rather than in line
+       with New Claim / History / Patients. It lives in the rail rather than the
+       sidebar because the sidebar hides itself on every route but New Claim,
+       and a profile you can only reach from one screen is not a profile. */
+    #railSpacer { flex: 1; }
+    #railDivider { width: 40px; height: 1px; flex: none; background: rgba(255, 255, 255, 0.16); margin: 4px 0 10px; }
+    .rail-avatar {
+      width: 28px; height: 28px; border-radius: 50%; flex: none;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(255, 255, 255, 0.16); color: var(--cream);
+      font-size: 10.5px; font-weight: 800;
+    }
+    .rail-item.active .rail-avatar { background: var(--ruby); }
+    /* A rail item is 58px wide and a provider name is not. The chip buys back
+       what it can -- narrower gutters, a smaller label -- and anything still too
+       long is trimmed, with the full name and organization on the aria-label. */
+    .rail-profile { padding-left: 2px; padding-right: 2px; }
+    .rail-profile-name {
+      max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 9.5px; letter-spacing: -0.01em;
+    }
+
     .route { display: none; flex: 1; min-width: 0; }
     .route.active { display: flex; }
     [hidden] { display: none !important; }
 
     /* ---- History route ---- */
-    #historyView.route.active, #patientsView.route.active, #recordView.route.active { display: block; }
-    #historyView, #patientsView, #recordView { flex: 1; min-width: 0; padding: 32px 44px; max-width: 900px; }
+    #historyView.route.active, #patientsView.route.active, #recordView.route.active, #providerView.route.active { display: block; }
+    #historyView, #patientsView, #recordView, #providerView { flex: 1; min-width: 0; padding: 32px 44px; max-width: 900px; }
     /* Routes that browse a record rather than work a queue have no nav of
        their own, so the sidebar steps out of the way rather than standing
        there empty. */
@@ -295,7 +322,7 @@
     .patients-toolbar .row-input { flex: 1; margin-bottom: 0; }
     .patients-toolbar .btn { flex: none; }
     #addPatientForm { margin-bottom: 12px; }
-    .patients-form-actions { display: flex; gap: 8px; margin-top: 14px; }
+    .form-actions { display: flex; gap: 8px; margin-top: 14px; }
 
     /* ---- Prepare claim: runs the whole pipeline in one step ---- */
     #prepareClaimBar {
@@ -567,6 +594,18 @@
       border-radius: 8px; background: var(--surface); color: var(--ink);
     }
     .field-grid input:disabled, .field-grid textarea:disabled { color: var(--ink-2); background: var(--border-soft); }
+
+    /* NPI and tax ID are masked until asked for -- they identify the provider,
+       and this app is demoed on a shared screen. type="password" rather than a
+       CSS text-security rule so a browser that does not support the rule fails
+       closed (masked) instead of open (readable). */
+    .masked-field { display: flex; gap: 6px; align-items: center; }
+    .masked-field input { flex: 1; min-width: 0; }
+    .masked-toggle {
+      flex: none; font-size: 11px; font-weight: 600; padding: 6px 9px; border-radius: 6px;
+      border: 1px solid var(--border-soft); background: var(--surface); color: var(--ink-2);
+    }
+    .masked-toggle:hover { background: var(--border-soft); color: var(--ink); }
     table.rh-table { border-collapse: collapse; width: 100%; margin-top: 8px; }
     table.rh-table th, table.rh-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: top; }
     table.rh-table th { font-size: 11.5px; color: var(--ink-2); font-weight: 700; }
@@ -612,6 +651,13 @@
       <button class="rail-item" data-route="patients" type="button">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Patients</span>
+      </button>
+
+      <div id="railSpacer"></div>
+      <div id="railDivider"></div>
+      <button class="rail-item rail-profile" data-route="provider" id="railProfileBtn" type="button" aria-label="Provider profile">
+        <span class="rail-avatar" id="railProfileInitials">--</span>
+        <span class="rail-profile-name" id="railProfileName">Provider</span>
       </button>
     </div>
 
@@ -825,13 +871,58 @@
           <label>Full name<input id="addPatientName" type="text" autocomplete="off" /></label>
           <label>Date of birth<input id="addPatientDob" type="date" /></label>
         </div>
-        <div class="patients-form-actions">
+        <div class="form-actions">
           <button id="addPatientSaveBtn" class="btn btn-primary" type="button">Add patient</button>
           <button id="addPatientCancelBtn" class="btn" type="button">Cancel</button>
         </div>
         <div id="addPatientStatus" class="status"></div>
       </div>
       <div id="historyPatientList"></div>
+    </div>
+
+    <div id="providerView" class="route">
+      <h1 class="page-title">Provider</h1>
+      <div class="page-subtitle">The billing provider every claim is built from. Saved here once, looked up each time a claim is populated -- so a change applies to the next claim, not to claims already drafted or submitted.</div>
+
+      <div class="section-title">Billing provider</div>
+      <div class="card">
+        <div class="field-grid">
+          <label>Provider name<input id="providerName" type="text" autocomplete="off" placeholder="e.g. Dana Whitfield, MD" /></label>
+          <label>Organization<input id="providerOrganization" type="text" autocomplete="off" placeholder="e.g. Ruby Health Demo Practice" /></label>
+          <label>NPI
+            <span class="masked-field">
+              <input id="providerNpi" type="password" inputmode="numeric" autocomplete="off" />
+              <button class="masked-toggle" type="button" data-mask-target="providerNpi" aria-pressed="false" aria-label="Show NPI">Show</button>
+            </span>
+          </label>
+          <label>Tax ID (EIN)
+            <span class="masked-field">
+              <input id="providerEin" type="password" inputmode="numeric" autocomplete="off" />
+              <button class="masked-toggle" type="button" data-mask-target="providerEin" aria-pressed="false" aria-label="Show tax ID">Show</button>
+            </span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Not asked for, but a save replaces the whole profile: a form holding
+           only the four fields above would drop the address and taxonomy code
+           every claim is built from, silently, on the first save. -->
+      <div class="section-title">Practice address</div>
+      <div class="card">
+        <div class="field-grid">
+          <label>Street<input id="providerAddress1" type="text" autocomplete="off" /></label>
+          <label>Suite or unit<input id="providerAddress2" type="text" autocomplete="off" /></label>
+          <label>City<input id="providerCity" type="text" autocomplete="off" /></label>
+          <label>State<input id="providerState" type="text" autocomplete="off" maxlength="2" placeholder="IL" /></label>
+          <label>ZIP<input id="providerPostalCode" type="text" inputmode="numeric" autocomplete="off" /></label>
+          <label>Taxonomy code<input id="providerTaxonomyCode" type="text" autocomplete="off" placeholder="207Q00000X" /></label>
+        </div>
+      </div>
+
+      <div class="form-actions">
+        <button id="providerSaveBtn" class="btn btn-primary" type="button">Save provider</button>
+      </div>
+      <div id="providerStatus" class="status"></div>
     </div>
 
     <div id="historyView" class="route">
@@ -916,6 +1007,7 @@
       "new-claim": document.getElementById("appShell"),
       patients: document.getElementById("patientsView"),
       history: document.getElementById("historyView"),
+      provider: document.getElementById("providerView"),
       // Not a rail destination of its own -- opened from Patients or History,
       // and it keeps whichever of those lit while you are inside it.
       record: document.getElementById("recordView"),
@@ -949,6 +1041,7 @@
       activateRoute(route);
       if (route === "history") loadHistoryBuckets();
       if (route === "patients") loadHistoryPatients();
+      if (route === "provider") loadProviderProfile();
     }
 
     // The browser's own back/forward buttons only know about entries this
@@ -978,9 +1071,14 @@
       }
     });
 
+    // Only Patients and History lead into a record, so only they can be the
+    // breadcrumb's first crumb. Anything else falls back to Patients rather
+    // than stamping a route the breadcrumb has no label for.
+    const RECORD_ORIGIN_ROUTES = new Set(["patients", "history"]);
+
     for (const btn of railButtons) {
       btn.addEventListener("click", () => {
-        recordOrigin = btn.dataset.route === "new-claim" ? "patients" : btn.dataset.route;
+        recordOrigin = RECORD_ORIGIN_ROUTES.has(btn.dataset.route) ? btn.dataset.route : "patients";
         showRoute(btn.dataset.route);
         pushHistoryState({ route: btn.dataset.route });
       });
@@ -4702,6 +4800,11 @@
 
       claimFieldGrid(slots.provider, [
         ["Name", c.provider.name, (v) => (c.provider.name = v)],
+        // The organization, not the clinician, is what reaches the payer as the
+        // billing provider -- a reviewer checking the claim has to be able to
+        // see it. A claim populated before this field existed has no value here
+        // and bills under Name; see buildStediClaim.js.
+        ["Organization", c.provider.organization, (v) => (c.provider.organization = v)],
         ["NPI", c.provider.npi, (v) => (c.provider.npi = v)],
         ["Address line 1", a.address1, (v) => (a.address1 = v)],
         ["Address line 2", a.address2, (v) => (a.address2 = v)],
@@ -5111,6 +5214,213 @@
       loadPatients();
     }
 
+    // ---- Provider profile ----
+    //
+    // One profile, stored server-side and looked up by populateClaim on every
+    // run, so what is saved here is what the payer sees in the claim's Provider
+    // block. This screen is the only way to change it without editing a file on
+    // the machine the server runs on.
+
+    const providerViewEl = document.getElementById("providerView");
+    const providerSaveBtn = document.getElementById("providerSaveBtn");
+    const providerStatusEl = document.getElementById("providerStatus");
+    const railProfileBtn = document.getElementById("railProfileBtn");
+    const railProfileInitialsEl = document.getElementById("railProfileInitials");
+    const railProfileNameEl = document.getElementById("railProfileName");
+
+    const providerFieldEls = {
+      name: document.getElementById("providerName"),
+      organization: document.getElementById("providerOrganization"),
+      npi: document.getElementById("providerNpi"),
+      ein: document.getElementById("providerEin"),
+      taxonomyCode: document.getElementById("providerTaxonomyCode"),
+      address1: document.getElementById("providerAddress1"),
+      address2: document.getElementById("providerAddress2"),
+      city: document.getElementById("providerCity"),
+      state: document.getElementById("providerState"),
+      postalCode: document.getElementById("providerPostalCode"),
+    };
+
+    // Entering the route re-fetches, and a re-fetch would overwrite whatever is
+    // half-typed. Once the form has been touched it outranks the server copy
+    // until it is saved.
+    let providerFormDirty = false;
+
+    function setProviderStatus(text, isError) {
+      providerStatusEl.textContent = text;
+      providerStatusEl.className = isError ? "status error" : "status";
+    }
+
+    // Credentials after the comma are a title, not part of the name.
+    function bareName(name) {
+      return String(name || "").split(",")[0].trim();
+    }
+
+    function providerInitials(name, organization) {
+      const parts = bareName(name || organization).split(/\s+/).filter(Boolean);
+      if (!parts.length) return "--";
+      if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+      return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+    }
+
+    function renderRailProfile(profile) {
+      const name = profile?.name || "";
+      const organization = profile?.organization || "";
+      railProfileInitialsEl.textContent = profile ? providerInitials(name, organization) : "--";
+
+      // The chip is 58px wide, so the label is the surname alone and the whole
+      // identity rides on the accessible name and the tooltip instead of being
+      // truncated into nothing.
+      const parts = bareName(name).split(/\s+/).filter(Boolean);
+      railProfileNameEl.textContent = parts.length ? parts[parts.length - 1] : "Provider";
+
+      const full = [name, organization].filter(Boolean).join(" -- ");
+      const label = full ? `Provider profile: ${full}` : "Provider profile -- not set up yet";
+      railProfileBtn.setAttribute("aria-label", label);
+      railProfileBtn.title = label;
+    }
+
+    function fillProviderForm(profile) {
+      const address = (profile && typeof profile.address === "object" && profile.address) || {};
+      providerFieldEls.name.value = profile?.name || "";
+      providerFieldEls.organization.value = profile?.organization || "";
+      providerFieldEls.npi.value = profile?.npi || "";
+      providerFieldEls.ein.value = profile?.ein || "";
+      providerFieldEls.taxonomyCode.value = profile?.taxonomyCode || "";
+      providerFieldEls.address1.value = address.address1 || "";
+      providerFieldEls.address2.value = address.address2 || "";
+      providerFieldEls.city.value = address.city || "";
+      providerFieldEls.state.value = address.state || "";
+      providerFieldEls.postalCode.value = address.postalCode || "";
+    }
+
+    // Revealing a field is for the moment you are checking it, not for the rest
+    // of the session -- leaving and coming back puts the cover back on, which
+    // matters when the leaving was to show someone another screen.
+    function maskProviderFields() {
+      for (const toggle of providerViewEl.querySelectorAll(".masked-toggle")) {
+        const input = document.getElementById(toggle.dataset.maskTarget);
+        if (input) input.type = "password";
+        toggle.textContent = "Show";
+        toggle.setAttribute("aria-pressed", "false");
+        toggle.setAttribute("aria-label", (toggle.getAttribute("aria-label") || "").replace(/^Hide/, "Show"));
+      }
+    }
+
+    // Delegated, so a masked field added to either card is wired up by its
+    // markup alone.
+    providerViewEl.addEventListener("click", (event) => {
+      const toggle = event.target.closest(".masked-toggle");
+      if (!toggle) return;
+      const input = document.getElementById(toggle.dataset.maskTarget);
+      if (!input) return;
+      const reveal = input.type === "password";
+      input.type = reveal ? "text" : "password";
+      toggle.textContent = reveal ? "Hide" : "Show";
+      toggle.setAttribute("aria-pressed", String(reveal));
+      const label = toggle.getAttribute("aria-label") || "";
+      toggle.setAttribute("aria-label", reveal ? label.replace(/^Show/, "Hide") : label.replace(/^Hide/, "Show"));
+    });
+
+    async function loadProviderProfile() {
+      try {
+        const res = await fetch("/api/provider-profile");
+        const data = await res.json();
+        if (!res.ok) {
+          setProviderStatus(data.error || "Could not load the provider profile.", true);
+          return;
+        }
+        renderRailProfile(data.profile);
+        if (providerFormDirty) return;
+        maskProviderFields();
+        fillProviderForm(data.profile);
+        setProviderStatus(
+          data.profile ? "" : "No provider is set up yet. Until one is, claims carry a placeholder NPI and say so.",
+          !data.profile
+        );
+      } catch (err) {
+        setProviderStatus("Could not load the provider profile: " + err.message, true);
+      }
+    }
+
+    async function saveProviderProfile() {
+      const value = (key) => providerFieldEls[key].value.trim();
+      const digits = (key) => providerFieldEls[key].value.replace(/\D/g, "");
+
+      const name = value("name");
+      const organization = value("organization");
+      const npi = digits("npi");
+      const ein = digits("ein");
+      const taxonomyCode = value("taxonomyCode").toUpperCase();
+      const address1 = value("address1");
+      const address2 = value("address2");
+      const city = value("city");
+      const state = value("state").toUpperCase();
+      const postalCode = digits("postalCode");
+
+      // Mirrors the server's own checks so a typo is caught while the field is
+      // still on screen, and covers the fields the server does not police but
+      // the claim still carries -- an address left blank does not fail loudly,
+      // it quietly bills from "123 Main St, Sample City".
+      if (!name) return setProviderStatus("Enter the provider's name.", true);
+      if (!organization) return setProviderStatus("Enter the organization that bills for this provider -- that is the name the payer sees.", true);
+      if (npi.length !== 10) return setProviderStatus("An NPI is exactly 10 digits.", true);
+      if (ein && ein.length !== 9) return setProviderStatus("A tax ID is exactly 9 digits.", true);
+      if (!address1 || !city || !state || !postalCode) {
+        return setProviderStatus("Every claim carries the practice address, so street, city, state and ZIP are all needed.", true);
+      }
+      if (state.length !== 2) return setProviderStatus("Use the two-letter state code, e.g. IL.", true);
+      if (postalCode.length !== 5 && postalCode.length !== 9) {
+        return setProviderStatus("A ZIP is 5 digits, or 9 for ZIP+4.", true);
+      }
+
+      const profile = {
+        name,
+        organization,
+        npi,
+        ...(ein ? { ein } : {}),
+        ...(taxonomyCode ? { taxonomyCode } : {}),
+        address: { address1, ...(address2 ? { address2 } : {}), city, state, postalCode },
+      };
+
+      providerSaveBtn.disabled = true;
+      setProviderStatus("Saving provider...");
+      try {
+        const res = await fetch("/api/provider-profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ profile }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setProviderStatus(data.error || "Could not save the provider profile.", true);
+          return;
+        }
+        providerFormDirty = false;
+        fillProviderForm(data.profile);
+        maskProviderFields();
+        renderRailProfile(data.profile);
+        setProviderStatus("Provider saved. The next claim populated will be built from it.");
+      } catch (err) {
+        setProviderStatus("Could not save the provider profile: " + err.message, true);
+      } finally {
+        providerSaveBtn.disabled = false;
+      }
+    }
+
+    providerSaveBtn.addEventListener("click", saveProviderProfile);
+
+    for (const el of Object.values(providerFieldEls)) {
+      el.addEventListener("input", () => {
+        providerFormDirty = true;
+      });
+      el.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        saveProviderProfile();
+      });
+    }
+
     // ---- init ----
 
     loadSavedState();
@@ -5124,6 +5434,9 @@
     showTab("transcript");
     history.replaceState({ route: "new-claim" }, "");
     showRoute("new-claim");
+    // The rail chip names the provider on every route, so it cannot wait for
+    // the Provider route to be opened.
+    loadProviderProfile();
   </script>
 </body>
 </html>

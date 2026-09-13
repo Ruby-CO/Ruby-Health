@@ -162,3 +162,22 @@ test("a claim's own id goes out as the payer's claim control number", () => {
   const stediClaim = buildStediClaim(claim);
   assert.equal(stediClaim.claimInformation.patientControlNumber, "CL014");
 });
+
+test("the billing provider the payer sees is the organization, not the clinician", () => {
+  const claim = populateClaim(facts, codes, {
+    ...testProviderProfile,
+    name: "Dana Whitfield, MD",
+    organization: "Ruby Family Medicine",
+  });
+  const stediClaim = buildStediClaim(claim);
+  assert.equal(stediClaim.providers[0].organizationName, "Ruby Family Medicine");
+});
+
+test("a profile saved before organization existed still bills under its name", () => {
+  // `name` and `organization` used to be one field. Those stored profiles carry
+  // the practice in `name`, and must keep billing under it rather than falling
+  // through to the placeholder.
+  const claim = populateClaim(facts, codes, testProviderProfile);
+  const stediClaim = buildStediClaim(claim);
+  assert.equal(stediClaim.providers[0].organizationName, "Test Practice");
+});
