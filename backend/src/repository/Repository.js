@@ -144,6 +144,16 @@ export class Repository {
     throw new NotImplementedError("listAllClaims");
   }
 
+  /** Throws away a claim that was drafted but never filed. Only a `draft` is
+   *  deletable: once a payer has seen a claim it is the billing record, and
+   *  the record of what was billed is not ours to erase. A claim another
+   *  claim was chained to is kept for the same reason -- deleting it would
+   *  orphan the correction that points at it.
+   *  @returns {Promise<object>} the deleted Claim, as it was */
+  async deleteClaim(_claimId) {
+    throw new NotImplementedError("deleteClaim");
+  }
+
   /** Records the payer's own identifier for a claim (ICN/DCN), which arrives
    *  on the 277CA or 835 rather than at submission time. A corrected claim
    *  cannot be filed without it -- the payer reads a resubmission carrying no
