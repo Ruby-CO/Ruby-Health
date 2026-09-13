@@ -46,7 +46,7 @@ const SYSTEM_PROMPT = `You suggest candidate ICD-10 diagnosis codes and CPT proc
 export async function suggestCodes(anthropic, model, facts) {
   const response = await anthropic.messages.create({
     model,
-    max_tokens: 1024,
+    max_tokens: 4096,
     system: SYSTEM_PROMPT,
     tools: [CODE_SUGGESTION_TOOL],
     tool_choice: { type: "tool", name: CODE_SUGGESTION_TOOL.name },
@@ -59,6 +59,14 @@ export async function suggestCodes(anthropic, model, facts) {
   });
 
   recordUsage("suggest-codes", model, response);
+
+  // A response cut off at max_tokens arrives as a tool_use block whose input
+  // is whatever JSON survived the cut -- usually nothing usable. That used to
+  // pass the tool_use check below and come out as an empty result with no
+  // error; on Opus 5 it happened on a third of encounters at the old 1024 cap.
+  if (response.stop_reason === "max_tokens") {
+    throw new Error("Claude's code suggestion output was cut off at max_tokens; raise the cap or shorten the input.");
+  }
 
   const toolUse = response.content.find((block) => block.type === "tool_use");
   if (!toolUse) {
