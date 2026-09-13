@@ -14,7 +14,11 @@ import { upsertProviderProfile, DEFAULT_PROVIDER_ID } from "../src/providerProfi
 // Exported so other scripts (e.g. smoke-stedi.js) can seed the same demo
 // profile on demand without duplicating it or re-running this file's CLI output.
 export const DEMO_PROVIDER_PROFILE = {
-  name: "Ruby Health Demo Practice",
+  // The clinician, and separately the practice that bills. Only `organization`
+  // reaches the payer (as the billing provider's organizationName); `name` is
+  // for the humans reading the profile screen. Both synthetic.
+  name: "Dana Whitfield, MD",
+  organization: "Ruby Health Demo Practice",
   npi: "1999999984", // Stedi's published test NPI
   // Enrolled with the Stedi Test Payer for 835 Claim payment (see
   // reference/../docs -- providers-test-claims-workflow) under this exact
