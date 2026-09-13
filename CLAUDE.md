@@ -400,6 +400,27 @@ Add a bucket there, not by hand-building another tab strip. The one without a
 `match` is All history, which is the activity feed rather than a slice of the
 claims.
 
+### Adding a patient
+
+**Patients** is the one place a patient is created outside the New Claim intake
+modal. The button is `.btn-primary` because adding one is the only action that
+route offers — it is the loud action there, and Submit is somewhere else.
+
+The form reuses `.field-grid` + `<label>`, the same labelled-field primitive as
+the Claim form. Don't fall back to bare placeholders: a `type="date"` input
+with no label reads as `mm/dd/yyyy`, which does not say *birth*.
+
+Two things it must keep doing, both learned by watching it fail:
+
+- **Clear the search box on success.** A query still in the box filters out the
+  row that was just added, so the patient appears not to have been created.
+- **Don't navigate.** Creating a patient leaves you on the list with a line
+  naming them and an `.rh-link` to open their record — a provider adding
+  several in a row should not be thrown into the first one's record.
+
+A birth date in the future is refused client-side. The server takes any date;
+this is a typo every time, and cheaper to catch before it reaches a claim.
+
 ### Acting on a claim from History
 
 History reads the record; it does not edit it in place. The exception is
