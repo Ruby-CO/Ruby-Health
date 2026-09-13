@@ -34,10 +34,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.join(__dirname, "..", "..", "frontend");
 
 const PORT = process.env.PORT || 3000;
-// The claim path -- extraction and coding -- runs on the strongest model:
-// coding judgment is the product, and a denied claim costs a practice far more
-// than the model call that produced it.
-const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-5";
+// The claim path -- extraction and coding. Sonnet for now, deliberately: the
+// model worth running here is the one that codes a real conversation best, and
+// nobody has measured that yet. Revisit it against the eval suite once there
+// are real demo encounters to score, rather than picking from first principles.
+const MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5";
 
 // Transcript cleanup is punctuation repair, not judgment, and it regenerates the
 // whole transcript as output tokens. It stays on a cheap model until it is

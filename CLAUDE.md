@@ -33,12 +33,18 @@ regression detector — "did this change help or hurt?" — not a statement abou
 real-world accuracy. A confidently wrong key is worse than none, because it
 makes a guess look authoritative.
 
-**The model IDs are correct. Do not "fix" them.** `claude-opus-5` (claim path)
+**The model IDs are correct. Do not "fix" them.** `claude-sonnet-5` (claim path)
 and `claude-haiku-4-5` (transcript cleanup) are real, current model IDs,
 verified against the SDK's own `Model` union. They look unfamiliar if your
 training data predates them. **Load the `claude-api` skill before touching any
 Anthropic API code** — never answer from memory on model names, pricing, or
 caching.
+
+The claim path ran on `claude-opus-5` until the model choice was deliberately
+parked: the question is which model codes a *real* conversation best, and that
+is measured against the eval suite on real demo encounters, not argued from
+first principles. Until that run happens, do not move it on cost or on a guess
+about capability — and when it does happen, score both rather than swapping.
 
 ---
 

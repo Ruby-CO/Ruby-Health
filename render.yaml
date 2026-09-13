@@ -10,9 +10,10 @@ services:
     envVars:
       - key: ANTHROPIC_API_KEY
         sync: false
-      # Claim path: extraction and coding. Coding judgment is the product.
+      # Claim path: extraction and coding. Revisit against the eval suite once
+      # there are real demo encounters to score it on.
       - key: ANTHROPIC_MODEL
-        value: claude-opus-5
+        value: claude-sonnet-5
       # Transcript cleanup only -- punctuation repair, not judgment.
       - key: ANTHROPIC_UTILITY_MODEL
         value: claude-haiku-4-5
