@@ -66,3 +66,27 @@ test("populateClaim uses a real provider profile when one is passed, with no war
   assert.equal(claim.provider.name, "Ruby Family Medicine");
   assert.ok(!claim.warnings.some((w) => w.code === "NO_PROVIDER_PROFILE"));
 });
+
+test("organization saves alongside name and reads back", () => {
+  const profile = {
+    name: "Dana Whitfield, MD",
+    organization: "Ruby Family Medicine",
+    npi: "1234567893",
+    address: { address1: "500 Health Way", city: "Springfield", state: "IL", postalCode: "627010000" },
+  };
+  upsertProviderProfile("split-name", profile);
+  assert.deepEqual(getProviderProfile("split-name"), profile);
+});
+
+test("rejects a tax ID that isn't exactly 9 digits", () => {
+  const base = { name: "Dr. Ruby", npi: "1234567893" };
+  // The hyphenated form is how a human writes it and how a payer rejects it.
+  assert.throws(() => upsertProviderProfile("bad-ein", { ...base, ein: "46-2871953" }), ProviderProfileError);
+  assert.throws(() => upsertProviderProfile("bad-ein", { ...base, ein: "12345" }), ProviderProfileError);
+});
+
+test("a tax ID is optional -- omitting or clearing it still saves", () => {
+  const base = { name: "Dr. Ruby", npi: "1234567893" };
+  assert.doesNotThrow(() => upsertProviderProfile("no-ein", base));
+  assert.doesNotThrow(() => upsertProviderProfile("blank-ein", { ...base, ein: "" }));
+});

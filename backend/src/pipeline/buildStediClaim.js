@@ -140,7 +140,11 @@ export function buildStediClaim(claim, config = {}) {
       {
         providerType: "BillingProvider",
         npi: digitsOnly(claim.provider?.npi) || "1999999984", // Stedi's published test NPI
-        organizationName: claim.provider?.name || "Ruby Health Demo Practice",
+        // The billing provider the payer sees is the practice, not the clinician.
+        // `organization` carries it; a profile saved before that field existed
+        // put the practice name in `name`, so that is the fallback rather than
+        // a placeholder.
+        organizationName: claim.provider?.organization || claim.provider?.name || "Ruby Health Demo Practice",
         employerId: claim.provider?.ein || config.billingProviderEin || "123456789",
         taxonomyCode: claim.provider?.taxonomyCode,
         // A real provider profile carries a structured address; the pre-profile

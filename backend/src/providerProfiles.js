@@ -59,6 +59,19 @@ function validate(profile) {
   if (!/^\d{10}$/.test(profile.npi)) {
     throw new ProviderProfileError("Provider NPI must be exactly 10 digits.");
   }
+  // Optional rather than required: profiles saved before `organization` existed
+  // carry the billing entity in `name`, and buildStediClaim still reads it from
+  // there. Rejecting those on re-save would lock an existing profile out of
+  // being edited at all.
+  if (profile.organization !== undefined && typeof profile.organization !== "string") {
+    throw new ProviderProfileError("Provider organization must be a string.");
+  }
+  // A tax ID reaches the payer as the employer ID (X12 REF*EI), which is nine
+  // digits. A hyphenated "46-2871953" is the shape a human writes it in and the
+  // shape the payer rejects, so it is refused here rather than at submission.
+  if (profile.ein !== undefined && profile.ein !== "" && !/^\d{9}$/.test(profile.ein)) {
+    throw new ProviderProfileError("Provider tax ID must be exactly 9 digits, with no hyphen.");
+  }
 }
 
 /** @returns {object|null} The profile, or null if none is configured for this ID. */
@@ -74,8 +87,12 @@ export function listProviderProfiles() {
 /**
  * Create or replace a provider's profile.
  * @param {string} providerId
- * @param {object} profile  { name, npi, ein?, ssn?, taxonomyCode?, phone?,
- *   address: { address1, address2?, city, state, postalCode } }
+ * @param {object} profile  { name, organization?, npi, ein?, ssn?, taxonomyCode?,
+ *   phone?, address: { address1, address2?, city, state, postalCode } }
+ *
+ * `name` is the clinician; `organization` is the billing entity the payer sees.
+ * They were one field originally -- see buildStediClaim.js for how a profile
+ * predating the split is still read correctly.
  */
 export function upsertProviderProfile(providerId, profile) {
   if (!providerId || typeof providerId !== "string") {
