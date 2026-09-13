@@ -14,6 +14,7 @@ import { buildCorrectedClaim, CorrectedClaimError } from "./pipeline/buildCorrec
 import { submitToStedi, StediSubmissionError } from "./pipeline/submitToStedi.js";
 import { annotateValidation, unrecognisedCodes } from "./pipeline/validateCodes.js";
 import { usageTotals } from "./usage.js";
+import { persistenceFailure } from "./persistence.js";
 import { loadCodeSet } from "../../reference/loadCodes.mjs";
 import { createNotionRepositoryFromEnv, createBlobStoreFromEnv, NotionRepositoryError } from "./repository/index.js";
 import { RemittanceParseError } from "./pipeline/parseRemittance.js";
@@ -137,17 +138,25 @@ function requireRepository(res) {
   return false;
 }
 
-// Best-effort: a persistence hiccup shouldn't take down a pipeline stage the
-// provider is actively watching. Logged, not surfaced, the same way code
-// validation warns instead of blocking.
+// Best-effort, and it says so. A persistence hiccup shouldn't take down a
+// pipeline stage the provider is actively watching -- but it must not be
+// reported as success either, which is what swallowing the error did: the
+// stage ticked green and the visit's record had a hole in it that nothing in
+// the UI mentioned.
+//
+// Returns null when persistence was never attempted (no repository configured,
+// or no encounter yet). That is not a failure and must not warn.
 async function persistArtifact(encounterId, stage, content) {
-  if (!repository || !encounterId) return;
+  if (!repository || !encounterId) return null;
   try {
     await repository.createArtifact({ encounterId, stage, content, createdBy: "system" });
+    return { stage, saved: true };
   } catch (err) {
     console.error(`Persisting '${stage}' artifact for encounter '${encounterId}' failed:`, err);
+    return { stage, saved: false };
   }
 }
+
 
 // What the stored rows already know about a visit, for populateClaim. Best
 // effort on purpose: populate runs before an encounter exists on the New Claim
@@ -735,10 +744,12 @@ app.post("/api/extract", async (req, res) => {
       if (autoProvisioned) effectiveEncounterId = autoProvisioned.encounter.encounterId;
     }
 
-    await persistArtifact(effectiveEncounterId, "transcript", { transcript });
-    await persistArtifact(effectiveEncounterId, "facts", facts);
+    const persistence = persistenceFailure(
+      await persistArtifact(effectiveEncounterId, "transcript", { transcript }),
+      await persistArtifact(effectiveEncounterId, "facts", facts)
+    );
 
-    res.json({ facts, encounterId: effectiveEncounterId || null, autoProvisioned });
+    res.json({ facts, encounterId: effectiveEncounterId || null, autoProvisioned, persistence });
   } catch (err) {
     console.error("Extraction failed:", err);
     res.status(502).json({ error: "Extraction failed. See server logs for details." });
@@ -789,9 +800,9 @@ app.post("/api/suggest-codes", async (req, res) => {
       console.log(JSON.stringify({ type: "validation", unrecognised }));
     }
 
-    await persistArtifact(encounterId, "codes", suggestions);
+    const persistence = persistenceFailure(await persistArtifact(encounterId, "codes", suggestions));
 
-    res.json({ suggestions });
+    res.json({ suggestions, persistence });
   } catch (err) {
     console.error("Code suggestion failed:", err);
     res.status(502).json({ error: "Code suggestion failed. See server logs for details." });
@@ -850,9 +861,9 @@ app.post("/api/populate-claim", async (req, res) => {
     const providerProfile = getProviderProfile(providerId || DEFAULT_PROVIDER_ID);
     const context = await buildClaimContext(encounterId);
     const claim = populateClaim(facts, codes, providerProfile, context);
-    await persistArtifact(encounterId, "claim", claim);
+    const persistence = persistenceFailure(await persistArtifact(encounterId, "claim", claim));
     await persistClaimDraft(encounterId, claim);
-    res.json({ claim });
+    res.json({ claim, persistence });
   } catch (err) {
     if (err instanceof ClaimError) {
       return res.status(400).json({ error: err.message });
