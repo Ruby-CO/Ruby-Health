@@ -95,7 +95,10 @@ export class Repository {
 
   // --- Artifact (versioned pipeline stage output) ---------------------------
 
-  /** @param {{ encounterId: string, stage: string, content: object, createdBy: string }} input
+  /** @param {{ encounterId: string, stage: string, content: object, createdBy: string,
+   *  providerId?: string }} input
+   *    `providerId` is a soft FK to the provider profile; optional, and empty
+   *    on rows written before it existed.
    *  @returns {Promise<object>} the created Artifact, version auto-incremented
    *  for this (encounterId, stage) pair */
   async createArtifact(_input) {
@@ -116,7 +119,10 @@ export class Repository {
   // --- Claim -----------------------------------------------------------------
 
   /** @param {{ encounterId: string, artifactId: string, claimType: string,
-   *  parentClaimId?: string, payerName: string, memberId: string }} input
+   *  parentClaimId?: string, payerName: string, memberId: string,
+   *  providerId?: string }} input
+   *    `providerId` is a soft FK to the provider profile; optional, and empty
+   *    on rows written before it existed.
    *  @returns {Promise<object>} the created Claim, status "draft" */
   async createClaim(_input) {
     throw new NotImplementedError("createClaim");

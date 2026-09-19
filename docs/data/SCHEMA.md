@@ -49,7 +49,7 @@ Seven, plus one that is modelled nowhere (see the last row).
 | **Claim** | Claims | `CL001` | A claim built from a specific artifact. Corrections and secondary filings are new rows chained to the original. |
 | **PayerFeedback** | Payer Feedback | `PF001` | What came back after submission — a 277CA acknowledgment or an 835 remittance. |
 | **Document** | Documents | `D001` | A file attached to a patient, optionally scoped to a case. A reserved slot: the schema exists, the upload and extraction UI does not. |
-| *ProviderProfile* | — | `default` | The billing provider's NPI, tax ID, taxonomy and address. **Not an entity** — a JSON file on ephemeral disk (`backend/src/providerProfiles.js`), keyed by `providerId` so it can become a table without touching call sites. |
+| *ProviderProfile* | — | `default` | The billing provider's NPI, tax ID, taxonomy and address. **Not an entity** — a JSON file on ephemeral disk (`backend/src/providerProfiles.js`), keyed by `providerId` so it can become a table without touching call sites. `Claim.provider_id` and `Artifact.provider_id` point at it. |
 
 ---
 
@@ -80,6 +80,13 @@ In words:
   is why `getClaimChain` traverses within an encounter rather than across the
   whole Claims database.
 - A **claim** collects **payer feedback** rows, oldest first.
+- A **claim** and an **artifact** each carry a `provider_id`: who the row was
+  created for. It is a soft FK to the provider profile, stamped at creation
+  from `resolveProviderId()` in `server.js` — the one seam where a real
+  identity source would attach. Today every row says `default`; rows written
+  before the field existed read back as `null`, and nothing requires it. A
+  correction or appeal inherits the original claim's provider. It is
+  independent of `parent_claim_id` and plays no part in chain traversal.
 - A **document** belongs to a patient and optionally narrows to a case. It
   attaches to no encounter.
 

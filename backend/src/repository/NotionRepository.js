@@ -131,6 +131,8 @@ function parseClaim(page) {
     submittedAt: dateValue(page, "submitted_at"),
     // Assigned by the payer, so it is empty until a 277CA or 835 comes back.
     payerClaimControlNumber: richText(page, "payer_claim_control_number") || null,
+    // Soft FK to the provider profile. Null on rows that predate the field.
+    providerId: richText(page, "provider_id") || null,
     createdAt: page.properties.created_at?.created_time || page.created_time || null,
   };
 }
@@ -175,6 +177,7 @@ function parseArtifact(page) {
     version: numberValue(page, "version"),
     content,
     createdBy: selectValue(page, "created_by"),
+    providerId: richText(page, "provider_id") || null,
     createdAt: page.properties.created_at?.created_time || page.created_time || null,
   };
 }
@@ -388,7 +391,7 @@ export class NotionRepository extends Repository {
     return parseEncounter(updated);
   }
 
-  async createArtifact({ encounterId, stage, content, createdBy }) {
+  async createArtifact({ encounterId, stage, content, createdBy, providerId }) {
     this._requireArtifactsDataSource();
     if (!encounterId) throw new NotionRepositoryError("createArtifact requires an encounterId.");
     if (!STAGES.includes(stage)) throw new NotionRepositoryError(`createArtifact stage must be one of: ${STAGES.join(", ")}.`);
@@ -417,6 +420,9 @@ export class NotionRepository extends Repository {
         version: { number: version },
         content: { rich_text: chunkedRichText(JSON.stringify(content)) },
         created_by: { select: { name: createdBy } },
+        // Not checked against the profile store on purpose: this file may not
+        // know provider profiles exist. A soft FK like every other one here.
+        provider_id: { rich_text: [{ text: { content: providerId || "" } }] },
       },
     });
     return parseArtifact(page);
@@ -446,7 +452,7 @@ export class NotionRepository extends Repository {
     return artifacts.reduce((latest, artifact) => (artifact.version > latest.version ? artifact : latest));
   }
 
-  async createClaim({ encounterId, artifactId, claimType, parentClaimId, payerName, memberId }) {
+  async createClaim({ encounterId, artifactId, claimType, parentClaimId, payerName, memberId, providerId }) {
     this._requireClaimsDataSource();
     if (!CLAIM_TYPES.includes(claimType)) {
       throw new NotionRepositoryError(`createClaim claimType must be one of: ${CLAIM_TYPES.join(", ")}.`);
@@ -476,6 +482,7 @@ export class NotionRepository extends Repository {
         parent_claim_id: { rich_text: [{ text: { content: parentClaimId || "" } }] },
         payer_name: { rich_text: [{ text: { content: payerName } }] },
         member_id: { rich_text: [{ text: { content: memberId } }] },
+        provider_id: { rich_text: [{ text: { content: providerId || "" } }] },
         status: { select: { name: "draft" } },
       },
     });

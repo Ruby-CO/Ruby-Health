@@ -448,6 +448,55 @@ test("createClaim creates an original claim in draft status", async () => {
   assert.equal(claim.submittedAt, null);
 });
 
+test("createClaim and createArtifact stamp the provider they were given", async () => {
+  const repo = makeRepository();
+  const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);
+
+  const stamped = await repo.createArtifact({
+    encounterId: encounter.encounterId,
+    stage: "facts",
+    content: { chiefComplaint: "sore throat" },
+    createdBy: "system",
+    providerId: "default",
+  });
+  assert.equal(stamped.providerId, "default");
+
+  const claim = await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer Insurance",
+    memberId: "M123456",
+    providerId: "default",
+  });
+  assert.equal(claim.providerId, "default");
+  assert.equal((await repo.getClaim(claim.claimId)).providerId, "default");
+});
+
+test("provider_id is optional, and a row written before it existed reads as null", async () => {
+  // Two shapes of absence: a new row with no provider given (written as ""),
+  // and an old row with no property at all. Both must read back null, and
+  // neither may throw -- nothing that reads Claim or Artifact today may start
+  // misbehaving on rows that predate the field.
+  const repo = makeRepository();
+  const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);
+
+  const claim = await repo.createClaim({
+    encounterId: encounter.encounterId,
+    artifactId: artifact.artifactId,
+    claimType: "original",
+    payerName: "Sample Payer Insurance",
+    memberId: "M123456",
+  });
+  assert.equal(claim.providerId, null);
+  assert.equal(artifact.providerId, null);
+
+  for (const page of repo.client._stores.claims.values()) delete page.properties.provider_id;
+  for (const page of repo.client._stores.artifacts.values()) delete page.properties.provider_id;
+  assert.equal((await repo.getClaim(claim.claimId)).providerId, null);
+  assert.equal((await repo.getLatestArtifact(encounter.encounterId, "claim")).providerId, null);
+});
+
 test("createClaim rejects an encounterId, artifactId, or parentClaimId that doesn't exist", async () => {
   const repo = makeRepository();
   const { encounter, artifact } = await makeEncounterWithClaimArtifact(repo);

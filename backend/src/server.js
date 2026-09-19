@@ -147,10 +147,10 @@ function requireRepository(res) {
 //
 // Returns null when persistence was never attempted (no repository configured,
 // or no encounter yet). That is not a failure and must not warn.
-async function persistArtifact(encounterId, stage, content) {
+async function persistArtifact(encounterId, stage, content, providerId) {
   if (!repository || !encounterId) return null;
   try {
-    await repository.createArtifact({ encounterId, stage, content, createdBy: "system" });
+    await repository.createArtifact({ encounterId, stage, content, createdBy: "system", providerId });
     return { stage, saved: true };
   } catch (err) {
     console.error(`Persisting '${stage}' artifact for encounter '${encounterId}' failed:`, err);
@@ -158,6 +158,15 @@ async function persistArtifact(encounterId, stage, content) {
   }
 }
 
+
+// Which provider a request acts for. Single-tenant today, so this is the
+// default profile unless the body names another -- and this function is the
+// one seam where multi-tenant would attach: every row that records a
+// provider gets its id from here, so a real identity source replaces one
+// line rather than a dozen call sites.
+function resolveProviderId(req) {
+  return (req.body && req.body.providerId) || DEFAULT_PROVIDER_ID;
+}
 
 // What the stored rows already know about a visit, for populateClaim. Best
 // effort on purpose: populate runs before an encounter exists on the New Claim
@@ -514,6 +523,7 @@ app.post("/api/encounters/:encounterId/artifacts", async (req, res) => {
       stage,
       content,
       createdBy,
+      providerId: resolveProviderId(req),
     });
     res.json({ artifact });
   } catch (err) {
@@ -755,9 +765,10 @@ app.post("/api/extract", async (req, res) => {
       if (autoProvisioned) effectiveEncounterId = autoProvisioned.encounter.encounterId;
     }
 
+    const providerId = resolveProviderId(req);
     const persistence = persistenceFailure(
-      await persistArtifact(effectiveEncounterId, "transcript", { transcript }),
-      await persistArtifact(effectiveEncounterId, "facts", facts)
+      await persistArtifact(effectiveEncounterId, "transcript", { transcript }, providerId),
+      await persistArtifact(effectiveEncounterId, "facts", facts, providerId)
     );
 
     res.json({ facts, encounterId: effectiveEncounterId || null, autoProvisioned, persistence });
@@ -811,7 +822,9 @@ app.post("/api/suggest-codes", async (req, res) => {
       console.log(JSON.stringify({ type: "validation", unrecognised }));
     }
 
-    const persistence = persistenceFailure(await persistArtifact(encounterId, "codes", suggestions));
+    const persistence = persistenceFailure(
+      await persistArtifact(encounterId, "codes", suggestions, resolveProviderId(req))
+    );
 
     res.json({ suggestions, persistence });
   } catch (err) {
@@ -827,7 +840,7 @@ app.post("/api/suggest-codes", async (req, res) => {
 // artifact the whole time. Filing a "draft" Claim row as soon as the claim
 // is populated means History always reflects what was created, not just
 // what got all the way to submission.
-async function persistClaimDraft(encounterId, claim) {
+async function persistClaimDraft(encounterId, claim, providerId) {
   if (!repository || !encounterId) return;
   try {
     const artifact = await repository.getLatestArtifact(encounterId, "claim");
@@ -852,6 +865,7 @@ async function persistClaimDraft(encounterId, claim) {
       claimType: "original",
       payerName: claim.payer?.name || "Unknown payer",
       memberId: claim.patient?.memberId || "Unknown member",
+      providerId,
     });
   } catch (err) {
     console.error(`Persisting draft claim for encounter '${encounterId}' failed:`, err);
@@ -872,8 +886,10 @@ app.post("/api/populate-claim", async (req, res) => {
     const providerProfile = getProviderProfile(providerId || DEFAULT_PROVIDER_ID);
     const context = await buildClaimContext(encounterId);
     const claim = populateClaim(facts, codes, providerProfile, context);
-    const persistence = persistenceFailure(await persistArtifact(encounterId, "claim", claim));
-    await persistClaimDraft(encounterId, claim);
+    const persistence = persistenceFailure(
+      await persistArtifact(encounterId, "claim", claim, providerId || DEFAULT_PROVIDER_ID)
+    );
+    await persistClaimDraft(encounterId, claim, providerId || DEFAULT_PROVIDER_ID);
     res.json({ claim, persistence });
   } catch (err) {
     if (err instanceof ClaimError) {
@@ -923,7 +939,7 @@ app.post("/api/provider-profile", (req, res) => {
 // ends with one Claim row, not two. Only creates a fresh one as a fallback,
 // for a claim submitted from an encounter old enough to predate that draft
 // row, or if drafting it failed at the time.
-async function persistSubmittedClaim(encounterId, claim) {
+async function persistSubmittedClaim(encounterId, claim, providerId) {
   if (!repository || !encounterId) return;
   try {
     const existingClaims = await repository.listClaimsForEncounter(encounterId);
@@ -939,6 +955,7 @@ async function persistSubmittedClaim(encounterId, claim) {
           claimType: "original",
           payerName: claim.payer?.name || "Unknown payer",
           memberId: claim.patient?.memberId || "Unknown member",
+          providerId,
         });
         await repository.updateClaimStatus(created.claimId, "submitted");
       }
@@ -988,7 +1005,7 @@ app.post("/api/submit-claim", async (req, res) => {
 
   try {
     const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
-    await persistSubmittedClaim(encounterId, claim);
+    await persistSubmittedClaim(encounterId, claim, resolveProviderId(req));
     res.json({ stediClaim, stediResponse });
   } catch (err) {
     if (err instanceof StediSubmissionError) {
@@ -1054,11 +1071,15 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
     // rather than no trace at all. That is the same reasoning as
     // persistClaimDraft on the original path, and #23's delete path can clear
     // a draft that never went anywhere.
+    // A correction belongs to whoever billed the original. Only a claim from
+    // before provider_id existed falls back to the request's provider.
+    const correctionProviderId = original.providerId || resolveProviderId(req);
     const correctedArtifact = await repository.createArtifact({
       encounterId: original.encounterId,
       stage: "claim",
       content: correctedClaim,
       createdBy: "system",
+      providerId: correctionProviderId,
     });
     const correctedClaimRow = await repository.createClaim({
       encounterId: original.encounterId,
@@ -1067,6 +1088,7 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
       parentClaimId: original.claimId,
       payerName: original.payerName,
       memberId: original.memberId,
+      providerId: correctionProviderId,
     });
 
     let stediClaim;
@@ -1162,11 +1184,14 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
     //
     // The letter is the human-facing record of why this went back. It rides
     // on the claim artifact because there is no appeal stage to put it in.
+    // Same rule as the correction path: the appeal is the original's provider's.
+    const appealProviderId = original.providerId || resolveProviderId(req);
     const appealArtifact = await repository.createArtifact({
       encounterId: original.encounterId,
       stage: "claim",
       content: { ...artifact.content, appealLetter: letterBody, appealOfClaimId: original.claimId },
       createdBy: "system",
+      providerId: appealProviderId,
     });
     const appealClaimRow = await repository.createClaim({
       encounterId: original.encounterId,
@@ -1175,6 +1200,7 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
       parentClaimId: original.claimId,
       payerName: original.payerName,
       memberId: original.memberId,
+      providerId: appealProviderId,
     });
 
     let stediClaim;
