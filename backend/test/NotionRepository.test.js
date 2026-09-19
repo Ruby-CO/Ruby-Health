@@ -100,6 +100,9 @@ function fakeNotionClient() {
         throw new Error(`fakeNotionClient: no page '${page_id}'`);
       },
     },
+    // For tests that need to shape a stored page by hand -- e.g. a row written
+    // before a property existed, which has no key for it at all.
+    _stores: stores,
   };
 }
 
@@ -152,6 +155,58 @@ test("createPatient rejects a missing name or date of birth", async () => {
   const repo = makeRepository();
   await assert.rejects(() => repo.createPatient({ dateOfBirth: "1990-04-12" }), NotionRepositoryError);
   await assert.rejects(() => repo.createPatient({ name: "Molly Chen" }), NotionRepositoryError);
+});
+
+test("createPatient stores sex and insurance status and reads them back", async () => {
+  const repo = makeRepository();
+  const created = await repo.createPatient({
+    name: "Molly Chen",
+    dateOfBirth: "1990-04-12",
+    sex: "female",
+    insuranceStatus: "insured",
+  });
+  assert.equal(created.sex, "female");
+  assert.equal(created.insuranceStatus, "insured");
+  const fetched = await repo.getPatient(created.patientId);
+  assert.equal(fetched.sex, "female");
+  assert.equal(fetched.insuranceStatus, "insured");
+});
+
+test("createPatient leaves sex and insurance status unset when not given", async () => {
+  // Absent means "not recorded". The property is omitted, not written with a
+  // placeholder option -- an empty select says that honestly.
+  const repo = makeRepository();
+  const created = await repo.createPatient({ name: "Molly Chen", dateOfBirth: "1990-04-12" });
+  assert.equal(created.sex, null);
+  assert.equal(created.insuranceStatus, null);
+});
+
+test("createPatient rejects a sex or insurance status outside the vocabulary", async () => {
+  // Notion would mint a new select option rather than reject it, and a typo
+  // would become a permanent column value. The repository is the guard.
+  const repo = makeRepository();
+  await assert.rejects(
+    () => repo.createPatient({ name: "Molly Chen", dateOfBirth: "1990-04-12", sex: "F" }),
+    NotionRepositoryError
+  );
+  await assert.rejects(
+    () => repo.createPatient({ name: "Molly Chen", dateOfBirth: "1990-04-12", insuranceStatus: "medicare" }),
+    NotionRepositoryError
+  );
+});
+
+test("a patient row written before sex and insurance existed still parses", async () => {
+  // Rows that predate the two properties have no such keys at all -- not an
+  // empty select, no key. Reading one must not throw or misbehave.
+  const repo = makeRepository();
+  const created = await repo.createPatient({ name: "Molly Chen", dateOfBirth: "1990-04-12" });
+  const page = [...repo.client._stores.patients.values()][0];
+  delete page.properties.sex;
+  delete page.properties.insurance_status;
+  const fetched = await repo.getPatient(created.patientId);
+  assert.equal(fetched.name, "Molly Chen");
+  assert.equal(fetched.sex, null);
+  assert.equal(fetched.insuranceStatus, null);
 });
 
 test("getPatient finds an existing patient and returns null for an unknown one", async () => {

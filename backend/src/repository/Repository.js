@@ -26,7 +26,9 @@ export class NotImplementedError extends Error {
 export class Repository {
   // --- Patient ---------------------------------------------------------
 
-  /** @param {{ name: string, dateOfBirth: string }} input
+  /** @param {{ name: string, dateOfBirth: string, sex?: string, insuranceStatus?: string }} input
+   *    `sex` is one of male | female | unknown and `insuranceStatus` one of
+   *    self_pay | insured | pending. Both optional; omitted means not recorded.
    *  @returns {Promise<object>} the created Patient */
   async createPatient(_input) {
     throw new NotImplementedError("createPatient");

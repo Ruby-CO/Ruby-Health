@@ -313,9 +313,10 @@
     .intake-option .intake-option-title { font-weight: 700; color: var(--ink); }
     .intake-option .intake-option-meta { color: var(--ink-2); font-size: 11.5px; }
     .intake-form { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
-    .intake-form input {
+    .intake-form input, .intake-form select {
       font: inherit; padding: 9px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--ink);
     }
+    .intake-form label { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-2); }
     #startClaimBtn { align-self: flex-start; margin-top: 8px; }
 
     .patients-toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
@@ -589,11 +590,11 @@
     fieldset.rh-fieldset legend { font-family: 'Manrope', system-ui, sans-serif; font-weight: 700; font-size: 13px; color: var(--plum); padding: 0 6px; }
     .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; margin-top: 4px; }
     .field-grid label { display: flex; flex-direction: column; font-size: 11.5px; color: var(--ink-2); gap: 5px; font-weight: 600; }
-    .field-grid input, .field-grid textarea {
+    .field-grid input, .field-grid textarea, .field-grid select {
       font-size: 13.5px; padding: 7px 9px; box-sizing: border-box; border: 1px solid var(--border-soft);
       border-radius: 8px; background: var(--surface); color: var(--ink);
     }
-    .field-grid input:disabled, .field-grid textarea:disabled { color: var(--ink-2); background: var(--border-soft); }
+    .field-grid input:disabled, .field-grid textarea:disabled, .field-grid select:disabled { color: var(--ink-2); background: var(--border-soft); }
 
     /* NPI and tax ID are masked until asked for -- they identify the provider,
        and this app is demoed on a shared screen. type="password" rather than a
@@ -712,6 +713,8 @@
           <div id="newPatientForm" class="intake-form" style="display:none;">
             <input id="newPatientName" type="text" placeholder="Full name" />
             <input id="newPatientDob" type="date" placeholder="Date of birth" />
+            <label>Sex<select id="newPatientSex"><option value="">Not recorded</option><option value="male">Male</option><option value="female">Female</option><option value="unknown">Unknown</option></select></label>
+            <label>Insurance<select id="newPatientInsurance"><option value="">Not recorded</option><option value="self_pay">Self-pay</option><option value="insured">Insured</option><option value="pending">Pending</option></select></label>
             <button id="createPatientBtn" class="btn btn-primary" type="button" style="align-self:flex-start;">Create patient</button>
           </div>
         </div>
@@ -870,6 +873,8 @@
         <div class="field-grid">
           <label>Full name<input id="addPatientName" type="text" autocomplete="off" /></label>
           <label>Date of birth<input id="addPatientDob" type="date" /></label>
+          <label>Sex<select id="addPatientSex"><option value="">Not recorded</option><option value="male">Male</option><option value="female">Female</option><option value="unknown">Unknown</option></select></label>
+          <label>Insurance<select id="addPatientInsurance"><option value="">Not recorded</option><option value="self_pay">Self-pay</option><option value="insured">Insured</option><option value="pending">Pending</option></select></label>
         </div>
         <div class="form-actions">
           <button id="addPatientSaveBtn" class="btn btn-primary" type="button">Add patient</button>
@@ -1300,6 +1305,8 @@
     const addPatientToggleBtn = document.getElementById("addPatientToggleBtn");
     const addPatientNameEl = document.getElementById("addPatientName");
     const addPatientDobEl = document.getElementById("addPatientDob");
+    const addPatientSexEl = document.getElementById("addPatientSex");
+    const addPatientInsuranceEl = document.getElementById("addPatientInsurance");
     const addPatientSaveBtn = document.getElementById("addPatientSaveBtn");
     const addPatientCancelBtn = document.getElementById("addPatientCancelBtn");
     const addPatientStatusEl = document.getElementById("addPatientStatus");
@@ -1328,6 +1335,8 @@
     async function addPatient() {
       const name = addPatientNameEl.value.trim();
       const dateOfBirth = addPatientDobEl.value;
+      const sex = addPatientSexEl.value;
+      const insuranceStatus = addPatientInsuranceEl.value;
       if (!name || !dateOfBirth) {
         setAddPatientStatus("Enter a name and date of birth.", true);
         return;
@@ -1345,13 +1354,15 @@
         const res = await fetch("/api/patients", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, dateOfBirth }),
+          body: JSON.stringify({ name, dateOfBirth, sex, insuranceStatus }),
         });
         const data = await res.json();
         if (!res.ok) {
           setAddPatientStatus(data.error || "Could not add this patient.", true);
           return;
         }
+        addPatientSexEl.value = "";
+        addPatientInsuranceEl.value = "";
         setAddPatientOpen(false);
         // A search still in the box would hide the row that was just added.
         historyPatientSearchEl.value = "";
@@ -1791,7 +1802,12 @@
 
       const slots = renderDetailView(historyPatientViewEl, {
         title: patient.name,
-        subtitle: `${patient.patientId} · DOB ${patient.dateOfBirth || "unknown"}`,
+        subtitle: [
+          patient.patientId,
+          `DOB ${patient.dateOfBirth || "unknown"}`,
+          patient.sex && `Sex: ${patient.sex}`,
+          patient.insuranceStatus && `Insurance: ${patient.insuranceStatus.replace("_", "-")}`,
+        ].filter(Boolean).join(" · "),
         sections: [{ name: "cases", title: "Cases" }],
       });
       fetchHistoryList(slots.cases, `/api/patients/${encodeURIComponent(patient.patientId)}/cases`, {
@@ -4781,11 +4797,16 @@
         slots.warnings.appendChild(warnBox);
       }
 
+      // populateClaim names the subscriber fields it had to invent. Claims
+      // stored before it did so carry no list; for those, sex and member ID
+      // were always invented, so the old fixed labels are the honest ones.
+      const invented = new Set(c.patient.placeholderFields || ["sex", "memberId"]);
+      const patientLabel = (label, field) => (invented.has(field) ? `${label} (placeholder)` : label);
       claimFieldGrid(slots.patient, [
-        ["Name", c.patient.name, (v) => (c.patient.name = v)],
-        ["Date of birth", c.patient.dob, (v) => (c.patient.dob = v)],
-        ["Sex (placeholder)", c.patient.sex, (v) => (c.patient.sex = v)],
-        ["Member ID (placeholder)", c.patient.memberId, (v) => (c.patient.memberId = v)],
+        [patientLabel("Name", "name"), c.patient.name, (v) => (c.patient.name = v)],
+        [patientLabel("Date of birth", "dob"), c.patient.dob, (v) => (c.patient.dob = v)],
+        [patientLabel("Sex", "sex"), c.patient.sex, (v) => (c.patient.sex = v)],
+        [patientLabel("Member ID", "memberId"), c.patient.memberId, (v) => (c.patient.memberId = v)],
       ], ws);
 
       // A real provider profile carries { address1, address2?, city, state,
@@ -4867,6 +4888,8 @@
     const newPatientFormEl = document.getElementById("newPatientForm");
     const newPatientNameInput = document.getElementById("newPatientName");
     const newPatientDobInput = document.getElementById("newPatientDob");
+    const newPatientSexInput = document.getElementById("newPatientSex");
+    const newPatientInsuranceInput = document.getElementById("newPatientInsurance");
     const createPatientBtn = document.getElementById("createPatientBtn");
     const caseStepEl = document.getElementById("caseStep");
     const caseListEl = document.getElementById("caseList");
@@ -5069,6 +5092,8 @@
     createPatientBtn.addEventListener("click", async () => {
       const name = newPatientNameInput.value.trim();
       const dateOfBirth = newPatientDobInput.value;
+      const sex = newPatientSexInput.value;
+      const insuranceStatus = newPatientInsuranceInput.value;
       if (!name || !dateOfBirth) {
         setIntakeStatus("Enter a name and date of birth.", true);
         return;
@@ -5080,7 +5105,7 @@
         const res = await fetch("/api/patients", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, dateOfBirth }),
+          body: JSON.stringify({ name, dateOfBirth, sex, insuranceStatus }),
         });
         const data = await res.json();
         if (!res.ok) {
@@ -5090,6 +5115,8 @@
         allPatients.push(data.patient);
         newPatientNameInput.value = "";
         newPatientDobInput.value = "";
+        newPatientSexInput.value = "";
+        newPatientInsuranceInput.value = "";
         setIntakeStatus("");
         selectPatient(data.patient);
       } catch (err) {

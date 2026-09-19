@@ -218,19 +218,49 @@ test("the patient name and date of birth come from the patient record", () => {
   assert.equal(claim.warnings.some((w) => w.code === "PLACEHOLDER_PATIENT"), false);
 });
 
-test("sex and member ID stay placeholders, without warning on every claim", () => {
-  // The schema carries no coverage, so these two are invented on every claim.
-  // They are marked on their own field labels in the claim form rather than
-  // warned about -- a warning true of every claim is noise, and it would sit in
-  // the same red box as an actual denial risk.
+test("member ID stays a placeholder, without warning on every claim", () => {
+  // The schema carries no coverage, so member ID is invented on every claim.
+  // It is marked on its own field label in the claim form rather than warned
+  // about -- a warning true of every claim is noise, and it would sit in the
+  // same red box as an actual denial risk.
   const claim = populateClaim(facts, oneCode, testProviderProfile, {
     patient: { name: "Molly Chen (synthetic)", dateOfBirth: "1990-04-12" },
   });
-  assert.equal(claim.patient.sex, "U");
   assert.equal(claim.patient.memberId, "SAMPLE-0001");
   // Names the regression it guards -- someone re-adding the blanket warning --
   // rather than counting, which would break on any unrelated warning class.
   assert.equal(claim.warnings.some((w) => w.code === "PLACEHOLDER_COVERAGE"), false);
+});
+
+test("a recorded sex reaches the claim as the letter the 837P carries", () => {
+  const female = populateClaim(facts, oneCode, testProviderProfile, {
+    patient: { name: "Molly Chen (synthetic)", dateOfBirth: "1990-04-12", sex: "female" },
+  });
+  assert.equal(female.patient.sex, "F");
+  assert.deepEqual(female.patient.placeholderFields, ["memberId"]);
+
+  const male = populateClaim(facts, oneCode, testProviderProfile, {
+    patient: { name: "Sam Rivera (synthetic)", dateOfBirth: "1985-11-02", sex: "male" },
+  });
+  assert.equal(male.patient.sex, "M");
+});
+
+test("a recorded sex of unknown is a fact, not a placeholder", () => {
+  const claim = populateClaim(facts, oneCode, testProviderProfile, {
+    patient: { name: "Molly Chen (synthetic)", dateOfBirth: "1990-04-12", sex: "unknown" },
+  });
+  assert.equal(claim.patient.sex, "U");
+  assert.deepEqual(claim.patient.placeholderFields, ["memberId"]);
+});
+
+test("a patient record with no sex leaves the claim's sex a flagged placeholder", () => {
+  // Rows written before the field existed, and providers who left it blank,
+  // both land here: U on the claim, and the field labelled as invented.
+  const claim = populateClaim(facts, oneCode, testProviderProfile, {
+    patient: { name: "Molly Chen (synthetic)", dateOfBirth: "1990-04-12" },
+  });
+  assert.equal(claim.patient.sex, "U");
+  assert.deepEqual(claim.patient.placeholderFields, ["sex", "memberId"]);
 });
 
 test("a fully-specified claim carries exactly the warnings it should, and no others", () => {
@@ -249,6 +279,7 @@ test("a fully-specified claim carries exactly the warnings it should, and no oth
 test("with no patient record every subscriber field is a flagged placeholder", () => {
   const claim = populateClaim(facts, oneCode, testProviderProfile);
   assert.equal(claim.patient.name, "Sample Patient (synthetic)");
+  assert.deepEqual(claim.patient.placeholderFields, ["name", "dob", "sex", "memberId"]);
   assert.equal(claim.warnings.some((w) => w.code === "PLACEHOLDER_PATIENT"), true);
 });
 

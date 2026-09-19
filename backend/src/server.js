@@ -172,7 +172,7 @@ async function buildClaimContext(encounterId) {
     const patient = encounter.patientId ? await repository.getPatient(encounter.patientId) : null;
     return {
       dateOfService: encounter.occurredAt || undefined,
-      patient: patient ? { name: patient.name, dateOfBirth: patient.dateOfBirth } : undefined,
+      patient: patient ? { name: patient.name, dateOfBirth: patient.dateOfBirth, sex: patient.sex } : undefined,
     };
   } catch (err) {
     console.error(`Reading claim context for encounter '${encounterId}' failed:`, err);
@@ -282,16 +282,26 @@ app.get("/api/patients", async (_req, res) => {
 
 app.post("/api/patients", async (req, res) => {
   if (!requireRepository(res)) return;
-  const { name, dateOfBirth } = req.body || {};
+  const { name, dateOfBirth, sex, insuranceStatus } = req.body || {};
 
   if (!name || !dateOfBirth) {
     return res.status(400).json({ error: "Request body must include 'name' and 'dateOfBirth'." });
   }
 
   try {
-    const patient = await repository.createPatient({ name, dateOfBirth });
+    // Empty strings from a blank <select> mean "not recorded", same as absent.
+    const patient = await repository.createPatient({
+      name,
+      dateOfBirth,
+      sex: sex || undefined,
+      insuranceStatus: insuranceStatus || undefined,
+    });
     res.json({ patient });
   } catch (err) {
+    // An unknown sex or insurance status is the caller's mistake, not the store's.
+    if (err instanceof NotionRepositoryError && /must be one of/.test(err.message)) {
+      return res.status(400).json({ error: err.message });
+    }
     console.error("Creating patient failed:", err);
     res.status(502).json({ error: "Creating patient failed. See server logs for details." });
   }

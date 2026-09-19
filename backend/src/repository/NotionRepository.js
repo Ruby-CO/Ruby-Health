@@ -26,6 +26,11 @@ const CLAIM_TYPES = ["original", "corrected", "secondary"];
 const CLAIM_STATUSES = ["draft", "submitted", "accepted", "rejected", "denied", "pending"];
 const DOCUMENT_SOURCES = ["upload", "fax", "ehr_sync"];
 const FEEDBACK_TYPES = ["acknowledgment", "remittance"];
+// Lowercase words, like every other select here; populateClaim maps them to
+// the M/F/U the claim form carries. Locked before the first write on purpose:
+// Notion mints a new option on any unknown value rather than rejecting it.
+const PATIENT_SEXES = ["male", "female", "unknown"];
+const INSURANCE_STATUSES = ["self_pay", "insured", "pending"];
 
 function titleText(page, property) {
   return page.properties[property]?.title?.[0]?.plain_text || "";
@@ -72,6 +77,8 @@ function parsePatient(page) {
     patientId: titleText(page, "patient_id"),
     name: richText(page, "name"),
     dateOfBirth: dateValue(page, "date_of_birth"),
+    sex: selectValue(page, "sex"),
+    insuranceStatus: selectValue(page, "insurance_status"),
     createdAt: page.properties.created_at?.created_time || page.created_time || null,
   };
 }
@@ -237,18 +244,32 @@ export class NotionRepository extends Repository {
     }
   }
 
-  async createPatient({ name, dateOfBirth }) {
+  async createPatient({ name, dateOfBirth, sex, insuranceStatus }) {
     if (!name) throw new NotionRepositoryError("createPatient requires a name.");
     if (!dateOfBirth) throw new NotionRepositoryError("createPatient requires a dateOfBirth.");
+    if (sex != null && !PATIENT_SEXES.includes(sex)) {
+      throw new NotionRepositoryError(`createPatient sex must be one of: ${PATIENT_SEXES.join(", ")}.`);
+    }
+    if (insuranceStatus != null && !INSURANCE_STATUSES.includes(insuranceStatus)) {
+      throw new NotionRepositoryError(
+        `createPatient insuranceStatus must be one of: ${INSURANCE_STATUSES.join(", ")}.`
+      );
+    }
 
     const patientId = await this._nextSequentialId(this.patientsDataSourceId, "patient_id", "P");
+    const properties = {
+      patient_id: { title: [{ text: { content: patientId } }] },
+      name: { rich_text: [{ text: { content: name } }] },
+      date_of_birth: { date: { start: dateOfBirth } },
+    };
+    // Both optional, and absent means "not recorded" -- written by omitting
+    // the property, never with a placeholder option that would read as a fact.
+    if (sex != null) properties.sex = { select: { name: sex } };
+    if (insuranceStatus != null) properties.insurance_status = { select: { name: insuranceStatus } };
+
     const page = await this.client.pages.create({
       parent: { data_source_id: this.patientsDataSourceId },
-      properties: {
-        patient_id: { title: [{ text: { content: patientId } }] },
-        name: { rich_text: [{ text: { content: name } }] },
-        date_of_birth: { date: { start: dateOfBirth } },
-      },
+      properties,
     });
     return parsePatient(page);
   }

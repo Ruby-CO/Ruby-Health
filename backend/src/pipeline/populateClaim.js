@@ -5,9 +5,9 @@
 const MAX_DIAGNOSES = 12;
 
 // The subscriber details a claim carries when nothing better is available.
-// Name and date of birth are filled from the Patient row whenever the claim is
-// populated from a real encounter; sex and member ID have nowhere to come from
-// -- the schema carries no coverage -- so they stay canned, and the claim says
+// Name, date of birth and sex are filled from the Patient row whenever the
+// claim is populated from a real encounter; member ID has nowhere to come from
+// -- the schema carries no coverage -- so it stays canned, and the claim says
 // so rather than looking complete.
 const PLACEHOLDER_PATIENT = {
   name: "Sample Patient (synthetic)",
@@ -15,6 +15,11 @@ const PLACEHOLDER_PATIENT = {
   sex: "U",
   memberId: "SAMPLE-0001",
 };
+
+// The Patient row stores words; the claim form and the 837P carry a letter.
+// Anything the row doesn't know stays "U" -- which is also what the payer
+// mapper falls back to, so the two can't disagree.
+const SEX_CODES = { male: "M", female: "F", unknown: "U" };
 
 export class ClaimError extends Error {
   constructor(message) {
@@ -43,7 +48,7 @@ function normalizeCode(code) {
  *   provider and a warning -- a claim never silently carries a fake NPI
  *   without saying so.
  * @param {object} [context] What the stored rows already know about this visit:
- *   `{ dateOfService, patient: { name, dateOfBirth } }`. Every field is
+ *   `{ dateOfService, patient: { name, dateOfBirth, sex } }`. Every field is
  *   optional -- populate can run before an encounter exists -- and each one
  *   missing costs a warning rather than a silent placeholder, on the same
  *   principle as the provider profile above. The lookup belongs to the caller:
@@ -127,18 +132,25 @@ export function populateClaim(facts, codes, providerProfile = null, context = {}
     });
   }
 
+  // `placeholderFields` names the subscriber fields the record could not
+  // supply, so the claim form can label exactly those and nothing else. A
+  // recorded sex of "unknown" is a fact the provider entered, not a gap, and
+  // is not listed.
+  const recordedSex = context.patient ? SEX_CODES[context.patient.sex] : undefined;
   const patient = context.patient
     ? {
         ...PLACEHOLDER_PATIENT,
         name: context.patient.name || PLACEHOLDER_PATIENT.name,
         dob: context.patient.dateOfBirth || PLACEHOLDER_PATIENT.dob,
+        sex: recordedSex || PLACEHOLDER_PATIENT.sex,
+        placeholderFields: recordedSex ? ["memberId"] : ["sex", "memberId"],
       }
-    : { ...PLACEHOLDER_PATIENT };
+    : { ...PLACEHOLDER_PATIENT, placeholderFields: ["name", "dob", "sex", "memberId"] };
 
-  // Only the anomalous case warns. Sex and member ID are invented on *every*
-  // claim -- the schema carries no coverage -- and a warning true of every
-  // claim is decoration, not a signal: it trains a reviewer to skim past the
-  // red box that sometimes means a denial. Those two are marked at the fields
+  // Only the anomalous case warns. Member ID is invented on *every* claim --
+  // the schema carries no coverage -- and a warning true of every claim is
+  // decoration, not a signal: it trains a reviewer to skim past the red box
+  // that sometimes means a denial. Invented fields are marked at the fields
   // themselves in the claim form instead. A claim with no patient record at
   // all is genuinely unusual, so that one still warns.
   if (!context.patient) {

@@ -42,7 +42,7 @@ Seven, plus one that is modelled nowhere (see the last row).
 
 | Entity | Notion DB | ID prefix | What it is |
 |---|---|---|---|
-| **Patient** | Patients | `P001` | A person on file. Name and date of birth only. |
+| **Patient** | Patients | `P001` | A person on file: name, date of birth, and — optionally — sex and a snapshot of insurance status. |
 | **Case** | Cases | `C001` | One episode of care. A patient can have several open at once — a broken arm and a pregnancy are separate stories that must not merge. |
 | **Encounter** | Encounters | `E001` | One visit inside a case. The unit the pipeline runs on. |
 | **Artifact** | Artifacts | `A001` | One version of one pipeline stage's output for one encounter. Append-only. |
@@ -123,7 +123,7 @@ both, together, always.
 **Vocabularies** (the `select` values) are declared as module constants at the
 top of `NotionRepository.js` and validated on write: `STAGES`,
 `CREATED_BY_VALUES`, `CLAIM_TYPES`, `CLAIM_STATUSES`, `DOCUMENT_SOURCES`,
-`FEEDBACK_TYPES`. **A new select property gets a constant and a write-time
+`FEEDBACK_TYPES`, `PATIENT_SEXES`, `INSURANCE_STATUSES`. **A new select property gets a constant and a write-time
 check.** Two current properties do not have one — `claim_status` and
 `recommended_route` on PayerFeedback take their values from
 `analyzeRemittance.js` instead, so the repository cannot reject a value it
@@ -141,6 +141,8 @@ These two are inconsistent with each other; the audit may say so.
 
 | Where | Values |
 |---|---|
+| `Patient.sex` | `male`, `female`, `unknown` — PHI. Optional; unset means not recorded. `populateClaim` maps to the `M`/`F`/`U` the 837P carries. |
+| `Patient.insurance_status` | `self_pay`, `insured`, `pending` — PHI-adjacent. Optional. A **snapshot**, not a history: a change overwrites. Eligibility (270/271) is a separate, unbuilt entity. |
 | `Case.status` | `open`, `closed` |
 | `Encounter.status` | `draft` (only value written today) |
 | `Artifact.stage` | `transcript`, `facts`, `codes`, `claim` |
