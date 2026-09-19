@@ -12,3 +12,4 @@ reference/codes/*
 !reference/codes/.gitkeep
 !reference/codes/EXAMPLE*
 reference/section111-excluded.csv
+.claude/settings.local.json
