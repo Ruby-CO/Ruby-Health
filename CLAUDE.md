@@ -123,8 +123,10 @@ caused a real crash before the defaults were added.
   comment. If a decision looks wrong without context, explain the context.
 - **Tests use Node's built-in runner** (`node:test`, `node:assert/strict`). No
   Jest, no Mocha, no Vitest. Files are `<module>.test.js` in a sibling `test/`.
-- **Branch off `master`, come back through a PR.** Nothing pushed straight to
-  master. See `CONTRIBUTING.md`.
+- **Commit straight to `master`.** One person works on this repo, so a PR is
+  ceremony with no reviewer behind it. The gate is CI, not review: a red suite
+  on master deploys nothing. Use a branch only for something you want to park
+  half-done. See `CONTRIBUTING.md`.
 - Auto-deploy on commit is a **prototype-only** arrangement. Production needs
   review gates — that distinction is written down in `CONTRIBUTING.md`.
 
@@ -481,15 +483,17 @@ jargon with an explanation appended — the plain version should stand on its ow
 **One piece at a time.** Prefer a short response with a single clear next step
 over a complete rundown of everything at once. Long responses lose the thread.
 
-**Push finished commits to their feature branch as soon as they're ready** --
-don't leave them sitting local-only. This isn't optional busywork: Claude Code
-sessions run in ephemeral cloud containers, and a commit that's never pushed can
-be lost for good if the container gets recycled before anyone notices.
+**Push finished commits as soon as they're ready** -- don't leave them sitting
+local-only. This isn't optional busywork: Claude Code sessions run in ephemeral
+cloud containers, and a commit that's never pushed can be lost for good if the
+container gets recycled before anyone notices.
 
-**Never merge a PR into `master`, or push directly to `master`, without an
-explicit go-ahead for that specific merge/push.** Master auto-deploys to the
-live Render site on every commit, so that's the boundary that needs a human
-green light -- feature-branch pushes don't.
+**Pushing to `master` is normal, and it is a deploy.** Run the four test
+commands before pushing, and after pushing say plainly that the live site is
+about to change. CI is the safety net -- the Render deploy waits on a green
+run, so a broken push leaves the site on the last good commit -- but a green
+push goes live with nobody in between. Say what went live. Don't push a
+half-finished change to master to save it; park it on a branch instead.
 
 ---
 

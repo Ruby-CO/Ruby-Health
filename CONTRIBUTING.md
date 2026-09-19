@@ -4,20 +4,28 @@
 
 `master` is the trunk. It should always hold a commit that could be deployed.
 
-Work happens on a branch off `master` and comes back through a pull request:
+One person works on this repository, so work is committed straight to `master`
+and pushed:
 
 ```
 git checkout master
 git pull origin master
-git checkout -b <short-description>
-# ...work, commit...
-git push -u origin <short-description>
-# open a PR into master
+# ...work, run the tests, commit...
+git push origin master
 ```
 
-Nothing is pushed directly to `master`. CI runs the backend test suite and a
-boot check on every pull request; a red suite means the branch is not ready,
-not that the check is inconvenient.
+Branches are for parking, not review: use one when a change has to sit
+half-done for a while, and merge it back yourself when it is ready. Nothing
+requires a pull request. Pull requests from earlier in the project were the
+review gate when the workflow was being set up; the gate now is CI. It runs the
+full suite and the boot check on every push to `master`, and the deploy waits
+on a green run -- so a red push changes nothing on the live site, and a green
+one goes live without anyone in between. Check that the run went green after
+pushing.
+
+This is a **prototype arrangement**. The moment a second person commits, or
+real patient data is in scope, go back to branches and pull requests with
+branch protection -- see "Before real patient data is involved" below.
 
 ## Deploys
 
@@ -56,8 +64,9 @@ it down — but it is still not what production needs.
 
 **Before real patient data is involved**, the following stop being optional:
 
-- Branch protection on `master`, with CI required to pass before a merge. The
-  suite already gates the *deploy*; nothing yet gates the *merge*.
+- Branches and pull requests again, with branch protection on `master` and CI
+  required to pass before a merge. The suite already gates the *deploy*;
+  nothing gates what reaches `master`.
 - The accuracy evaluation suite gating deploys alongside the unit tests, so a
   change that quietly degrades coding accuracy cannot ship.
 - A staging environment that receives the deploy first, with promotion to
