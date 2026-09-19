@@ -203,6 +203,28 @@ ones; a file that accumulates makes the current state hard to read.
 
 Structure:
 
+0. **A machine-readable block, first line of the file.** An HTML comment, so
+   it is invisible wherever the file is rendered. `record-audit-run.js` reads
+   it to file the run in the Notion *Data Model Audits* database, and it parses
+   this rather than your prose because your prose is allowed to vary:
+
+   ```
+   <!-- audit-meta
+   {"runAt":"2026-09-19T03:02:00Z","commit":"3e3fa3e","introspection":"live-verified","label":"Output check, and P2 catch-up","headline":"One sentence: what this run actually found."}
+   -->
+   ```
+
+   `runAt` is ISO-8601 UTC, from `date -u +%Y-%m-%dT%H:%M:%SZ`. `commit` is the
+   short SHA you audited. `introspection` is exactly `live-verified` or
+   `code-only`. `label` is three-to-six words distinguishing this run from the
+   one before it — not a date, since the row's name already carries one, and
+   two runs can land on the same day. `headline` is one sentence someone
+   reading a table of runs would want.
+
+   Deliberately no counts here. The script derives those from the findings
+   themselves, so a miscounted summary is caught rather than copied — which
+   has already happened once.
+
 1. **Header** — date, git SHA (`git rev-parse --short HEAD`), introspection
    mode, and a two-or-three sentence plain-language summary of the state of
    the model. Written for someone who will not read past it.
@@ -241,6 +263,12 @@ Close your report to the caller with:
 - the two file paths you wrote;
 - the introspection mode you ran in;
 - the three findings that most deserve a decision, one line each;
+- **the row values for the Notion run log** — name, commit, introspection,
+  total findings, the count at each severity, and the headline — as a short
+  block the caller can act on without opening anything. `record-audit-run.js`
+  files this automatically when it is run, but the values go in your report
+  too: the run log was missed once because nothing put them in front of the
+  person who had just invoked the agent;
 - the explicit note: **no schema changes were made; everything above is a
   proposal awaiting approval.**
 

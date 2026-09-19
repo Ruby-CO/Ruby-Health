@@ -1,3 +1,7 @@
+<!-- audit-meta
+{"runAt": "2026-09-19T03:02:00Z", "commit": "3e3fa3e", "introspection": "live-verified", "label": "Output check, and P2 catch-up", "headline": "Run to check the agent's output is clean \u2014 it is \u2014 and it found seven new things, three of them worth a decision."}
+-->
+
 # Ruby Health — data model audit
 
 **Date:** 2026-09-19
