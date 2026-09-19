@@ -7,7 +7,9 @@
 //
 // Run: node scripts/record-audit-run.js [--dry-run]
 //   NOTION_API_KEY                 an integration token shared with the database
-//   NOTION_AUDIT_LOG_DATA_SOURCE_ID  the data source id (has a default below)
+//   NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID  the data source id (has a default below).
+//     Named in full rather than NOTION_AUDIT_LOG_..., which is already taken by the
+//     app's own Audit Log database -- the short name silently pointed this at that.
 //
 // --dry-run derives and prints the row without a token, so the output can be
 // checked offline.
@@ -59,7 +61,7 @@ if (dryRun) {
 }
 
 const apiKey = process.env.NOTION_API_KEY;
-const dataSourceId = process.env.NOTION_AUDIT_LOG_DATA_SOURCE_ID || DEFAULT_DATA_SOURCE;
+const dataSourceId = process.env.NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID || DEFAULT_DATA_SOURCE;
 // Skips rather than fails when the token is absent, matching the deploy step
 // in ci.yml: a workflow should not go red because a secret has not been added
 // yet, and the agent run that precedes this one costs real money -- losing it
@@ -103,8 +105,22 @@ try {
   });
   console.log(`\nFiled: ${page.url || page.id}`);
 } catch (err) {
-  const message = err?.body || err?.message || String(err);
-  if (String(message).includes("Could not find")) {
+  const message = String(err?.body || err?.message || String(err));
+
+  // These two read almost the same and mean opposite things. Matching them
+  // together once sent someone hunting for a sharing problem that did not
+  // exist, while the real cause -- pointing at the wrong database entirely --
+  // was named in the error and ignored.
+  if (/Could not find property/.test(message)) {
+    fail(
+      `Data source ${dataSourceId} is reachable, but it is not the Data Model Audits database:\n` +
+        `  ${message}\n\n` +
+        `Nothing was written, which is the right outcome -- filing an audit run into some other\n` +
+        `database would be worse than failing. Check NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID if it is set;\n` +
+        `it should be the Data Model Audits database, not the app's Audit Log.`
+    );
+  }
+  if (/Could not find (data ?source|database|page|block)/i.test(message)) {
     fail(
       `Notion could not find data source ${dataSourceId}.\n` +
         `Either the id is wrong, or the integration behind NOTION_API_KEY has not been shared with the\n` +

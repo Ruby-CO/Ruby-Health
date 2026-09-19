@@ -134,5 +134,5 @@ jobs:
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
           # Not a secret, same as the page id above.
-          NOTION_AUDIT_LOG_DATA_SOURCE_ID: ${{ vars.NOTION_AUDIT_LOG_DATA_SOURCE_ID || '8970790a-d157-47af-bc8a-3aa6542960c0' }}
+          NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID || '8970790a-d157-47af-bc8a-3aa6542960c0' }}
         run: node scripts/record-audit-run.js
