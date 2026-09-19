@@ -102,5 +102,5 @@ keeps the change off the live site.
 ## A standing rule about this codebase
 
 No real patient data, ever, until the compliance phase is genuinely done. This
-build has no encryption at rest, no audit logging, no retention policy, and no
-signed BAA. Synthetic encounters only.
+build has no encryption at rest, no retention policy, no signed BAA, and an
+audit log that anyone with Notion access can edit. Synthetic encounters only.

@@ -209,6 +209,28 @@ export class Repository {
     throw new NotImplementedError("getClaimChain");
   }
 
+  // --- AuditLog (who did what to which claim or artifact, when) -------------
+  //
+  // Append-only by contract: there is no update or delete. Callers go through
+  // backend/src/auditLog.js, which guarantees a log failure never blocks or
+  // rolls back the write it describes.
+
+  /** @param {{ providerId: string, entityType: string, entityId?: string,
+   *  action: string, detail?: string }} input
+   *    `entityType` is claim | artifact; `action` is one of created | edited |
+   *    status_changed | submitted | approved. `entityId` may be empty when the
+   *    write it describes failed before an id existed.
+   *  @returns {Promise<object>} the created log entry */
+  async createLogEntry(_input) {
+    throw new NotImplementedError("createLogEntry");
+  }
+
+  /** @returns {Promise<object[]>} every log entry for one claim or artifact,
+   *  oldest first */
+  async getLogForEntity(_entityType, _entityId) {
+    throw new NotImplementedError("getLogForEntity");
+  }
+
   // --- Document (schema slot -- no upload or extraction UI in this chunk) ----
 
   /** @param {{ patientId: string, caseId?: string, source: string,

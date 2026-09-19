@@ -6,8 +6,8 @@ A prototype claims tool. It takes a recording of a patient visit, pulls out the
 clinical facts, suggests ICD-10 and CPT codes, and drafts an insurance claim for
 a human to review.
 
-It is **not** the production system. No encryption at rest, no audit logging, no
-retention policy, no BAA.
+It is **not** the production system. No encryption at rest, no retention
+policy, no BAA. There is an audit log, but it is not tamper-evident.
 
 ---
 

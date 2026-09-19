@@ -11,6 +11,7 @@
 
 import { parseRemittance } from "./parseRemittance.js";
 import { analyzeRemittance } from "./analyzeRemittance.js";
+import { recordAudit } from "../auditLog.js";
 
 // Ruby's Claim carries five statuses; an 835 distinguishes more than that.
 // The finer verdict is kept in full on the PayerFeedback row -- this only
@@ -130,6 +131,16 @@ export async function ingestRemittance({
   }
   const claimStatus = CLAIM_STATUS_FROM_ADJUDICATION[adjudication.status] || "pending";
   await repository.updateClaimStatus(claimId, claimStatus);
+  // The one status change nobody at Ruby made: the payer did. There is no
+  // request provider here, so the actor is whoever the claim belongs to --
+  // its own provider_id -- and the detail says the 835 drove it.
+  await recordAudit(repository, {
+    providerId: claim.providerId || "default",
+    entityType: "claim",
+    entityId: claimId,
+    action: "status_changed",
+    detail: `status: ${claim.status} -> ${claimStatus} (835)`,
+  });
 
   return { feedback, analysis, claimStatus, otherClaimsInDocument: parsedClaims.length - 1 };
 }

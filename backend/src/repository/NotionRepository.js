@@ -31,6 +31,8 @@ const FEEDBACK_TYPES = ["acknowledgment", "remittance"];
 // Notion mints a new option on any unknown value rather than rejecting it.
 const PATIENT_SEXES = ["male", "female", "unknown"];
 const INSURANCE_STATUSES = ["self_pay", "insured", "pending"];
+const AUDIT_ENTITY_TYPES = ["claim", "artifact"];
+const AUDIT_ACTIONS = ["created", "edited", "status_changed", "submitted", "approved"];
 
 function titleText(page, property) {
   return page.properties[property]?.title?.[0]?.plain_text || "";
@@ -137,6 +139,20 @@ function parseClaim(page) {
   };
 }
 
+function parseAuditEntry(page) {
+  return {
+    logId: titleText(page, "log_id"),
+    providerId: richText(page, "provider_id") || null,
+    entityType: selectValue(page, "entity_type"),
+    // Empty when the write it describes failed before an id existed; the
+    // detail names the encounter and stage in that case.
+    entityId: richText(page, "entity_id") || null,
+    action: selectValue(page, "action"),
+    detail: richTextAll(page, "detail"),
+    createdAt: page.properties.created_at?.created_time || page.created_time || null,
+  };
+}
+
 function parsePayerFeedback(page) {
   const raw = richTextAll(page, "content");
   let content = null;
@@ -202,6 +218,7 @@ export class NotionRepository extends Repository {
     claimsDataSourceId,
     documentsDataSourceId,
     payerFeedbackDataSourceId,
+    auditLogDataSourceId,
   }) {
     super();
     if (!client) throw new NotionRepositoryError("NotionRepository requires a Notion client.");
@@ -215,6 +232,7 @@ export class NotionRepository extends Repository {
     this.claimsDataSourceId = claimsDataSourceId;
     this.documentsDataSourceId = documentsDataSourceId;
     this.payerFeedbackDataSourceId = payerFeedbackDataSourceId;
+    this.auditLogDataSourceId = auditLogDataSourceId;
   }
 
   _requireEncountersDataSource() {
@@ -244,6 +262,12 @@ export class NotionRepository extends Repository {
   _requirePayerFeedbackDataSource() {
     if (!this.payerFeedbackDataSourceId) {
       throw new NotionRepositoryError("NotionRepository was not configured with payerFeedbackDataSourceId.");
+    }
+  }
+
+  _requireAuditLogDataSource() {
+    if (!this.auditLogDataSourceId) {
+      throw new NotionRepositoryError("NotionRepository was not configured with auditLogDataSourceId.");
     }
   }
 
@@ -702,6 +726,50 @@ export class NotionRepository extends Repository {
       }
     }
     return chain.sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
+  }
+
+  // Append-only. Nothing here updates or deletes a log row, and there is
+  // deliberately no method that could. The entity is not re-checked to exist:
+  // a log entry for a write that failed is exactly the case this has to cover,
+  // and a lookup that could itself fail would make the log the fragile part.
+  async createLogEntry({ providerId, entityType, entityId, action, detail }) {
+    this._requireAuditLogDataSource();
+    if (!AUDIT_ENTITY_TYPES.includes(entityType)) {
+      throw new NotionRepositoryError(`createLogEntry entityType must be one of: ${AUDIT_ENTITY_TYPES.join(", ")}.`);
+    }
+    if (!AUDIT_ACTIONS.includes(action)) {
+      throw new NotionRepositoryError(`createLogEntry action must be one of: ${AUDIT_ACTIONS.join(", ")}.`);
+    }
+
+    const logId = await this._nextSequentialId(this.auditLogDataSourceId, "log_id", "LOG");
+    const page = await this.client.pages.create({
+      parent: { data_source_id: this.auditLogDataSourceId },
+      properties: {
+        log_id: { title: [{ text: { content: logId } }] },
+        provider_id: { rich_text: [{ text: { content: providerId || "" } }] },
+        entity_type: { select: { name: entityType } },
+        entity_id: { rich_text: [{ text: { content: entityId || "" } }] },
+        action: { select: { name: action } },
+        // Chunked so a long error message can never be the reason the log
+        // write itself fails.
+        detail: { rich_text: chunkedRichText(String(detail ?? "")) },
+      },
+    });
+    return parseAuditEntry(page);
+  }
+
+  async getLogForEntity(entityType, entityId) {
+    this._requireAuditLogDataSource();
+    if (!AUDIT_ENTITY_TYPES.includes(entityType)) {
+      throw new NotionRepositoryError(`getLogForEntity entityType must be one of: ${AUDIT_ENTITY_TYPES.join(", ")}.`);
+    }
+    const pages = await this._queryAll(this.auditLogDataSourceId, {
+      and: [
+        { property: "entity_type", select: { equals: entityType } },
+        { property: "entity_id", rich_text: { equals: entityId } },
+      ],
+    });
+    return pages.map(parseAuditEntry).sort((a, b) => (a.createdAt || "").localeCompare(b.createdAt || ""));
   }
 
   async createDocument({ patientId, caseId, source, documentDate, storageRef }) {

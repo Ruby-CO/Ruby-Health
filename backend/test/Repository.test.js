@@ -31,6 +31,8 @@ test("every Repository method throws NotImplementedError until a subclass overri
     () => repo.createPayerFeedback({}),
     () => repo.getPayerFeedback("PF001"),
     () => repo.listPayerFeedbackForClaim("CL001"),
+    () => repo.createLogEntry({}),
+    () => repo.getLogForEntity("claim", "CL001"),
     () => repo.createDocument({}),
     () => repo.getDocument("D001"),
     () => repo.listDocumentsForPatient("P001"),

@@ -29,6 +29,7 @@ import {
   DEFAULT_PROVIDER_ID,
 } from "./providerProfiles.js";
 import { DEMO_PROVIDER_PROFILE } from "../scripts/seed-provider-profile.js";
+import { recordAudit } from "./auditLog.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.join(__dirname, "..", "..", "frontend");
@@ -150,10 +151,28 @@ function requireRepository(res) {
 async function persistArtifact(encounterId, stage, content, providerId) {
   if (!repository || !encounterId) return null;
   try {
-    await repository.createArtifact({ encounterId, stage, content, createdBy: "system", providerId });
+    const artifact = await repository.createArtifact({ encounterId, stage, content, createdBy: "system", providerId });
+    await recordAudit(repository, {
+      providerId,
+      entityType: "artifact",
+      entityId: artifact.artifactId,
+      action: "created",
+      detail: `${stage} v${artifact.version} · encounter ${encounterId}`,
+    });
     return { stage, saved: true };
   } catch (err) {
     console.error(`Persisting '${stage}' artifact for encounter '${encounterId}' failed:`, err);
+    // The failure is logged too -- it is the first time a lost save leaves a
+    // trace anywhere but the console. No artifact id exists, so the detail
+    // carries what would have identified it. Still logging-and-continuing:
+    // whether this should hard-fail is a separate decision.
+    await recordAudit(repository, {
+      providerId,
+      entityType: "artifact",
+      entityId: "",
+      action: "created",
+      detail: `persist failed · encounter ${encounterId} · stage ${stage} · ${err.message}`,
+    });
     return { stage, saved: false };
   }
 }
@@ -525,6 +544,15 @@ app.post("/api/encounters/:encounterId/artifacts", async (req, res) => {
       createdBy,
       providerId: resolveProviderId(req),
     });
+    // The one place a person, not the pipeline, changes an artifact. Logging
+    // the machine writes and skipping this one would invert the log's point.
+    await recordAudit(repository, {
+      providerId: resolveProviderId(req),
+      entityType: "artifact",
+      entityId: artifact.artifactId,
+      action: createdBy === "provider_edit" ? "edited" : "created",
+      detail: `${stage} v${artifact.version} · encounter ${req.params.encounterId} · ${createdBy}`,
+    });
     res.json({ artifact });
   } catch (err) {
     if (err instanceof NotionRepositoryError) {
@@ -859,13 +887,20 @@ async function persistClaimDraft(encounterId, claim, providerId) {
       return;
     }
 
-    await repository.createClaim({
+    const created = await repository.createClaim({
       encounterId,
       artifactId: artifact.artifactId,
       claimType: "original",
       payerName: claim.payer?.name || "Unknown payer",
       memberId: claim.patient?.memberId || "Unknown member",
       providerId,
+    });
+    await recordAudit(repository, {
+      providerId,
+      entityType: "claim",
+      entityId: created.claimId,
+      action: "created",
+      detail: `draft from ${artifact.artifactId}`,
     });
   } catch (err) {
     console.error(`Persisting draft claim for encounter '${encounterId}' failed:`, err);
@@ -946,6 +981,13 @@ async function persistSubmittedClaim(encounterId, claim, providerId) {
     const draft = [...existingClaims].reverse().find((c) => c.status === "draft");
     if (draft) {
       await repository.updateClaimStatus(draft.claimId, "submitted");
+      await recordAudit(repository, {
+        providerId,
+        entityType: "claim",
+        entityId: draft.claimId,
+        action: "status_changed",
+        detail: "status: draft -> submitted",
+      });
     } else {
       const artifact = await repository.getLatestArtifact(encounterId, "claim");
       if (artifact) {
@@ -957,7 +999,21 @@ async function persistSubmittedClaim(encounterId, claim, providerId) {
           memberId: claim.patient?.memberId || "Unknown member",
           providerId,
         });
+        await recordAudit(repository, {
+          providerId,
+          entityType: "claim",
+          entityId: created.claimId,
+          action: "created",
+          detail: `draft from ${artifact.artifactId} (filed at submission)`,
+        });
         await repository.updateClaimStatus(created.claimId, "submitted");
+        await recordAudit(repository, {
+          providerId,
+          entityType: "claim",
+          entityId: created.claimId,
+          action: "status_changed",
+          detail: "status: draft -> submitted",
+        });
       }
     }
 
@@ -1090,6 +1146,13 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
       memberId: original.memberId,
       providerId: correctionProviderId,
     });
+    await recordAudit(repository, {
+      providerId: correctionProviderId,
+      entityType: "claim",
+      entityId: correctedClaimRow.claimId,
+      action: "created",
+      detail: `corrected claim of ${original.claimId}`,
+    });
 
     let stediClaim;
     try {
@@ -1107,6 +1170,13 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
 
     const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
     await repository.updateClaimStatus(correctedClaimRow.claimId, "submitted");
+    await recordAudit(repository, {
+      providerId: correctionProviderId,
+      entityType: "claim",
+      entityId: correctedClaimRow.claimId,
+      action: "status_changed",
+      detail: "status: draft -> submitted",
+    });
 
     res.json({ claim: correctedClaimRow, stediClaim, stediResponse });
   } catch (err) {
@@ -1202,6 +1272,13 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
       memberId: original.memberId,
       providerId: appealProviderId,
     });
+    await recordAudit(repository, {
+      providerId: appealProviderId,
+      entityType: "claim",
+      entityId: appealClaimRow.claimId,
+      action: "created",
+      detail: `appeal of ${original.claimId}`,
+    });
 
     let stediClaim;
     try {
@@ -1219,6 +1296,13 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
 
     const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
     await repository.updateClaimStatus(appealClaimRow.claimId, "submitted");
+    await recordAudit(repository, {
+      providerId: appealProviderId,
+      entityType: "claim",
+      entityId: appealClaimRow.claimId,
+      action: "status_changed",
+      detail: "status: draft -> submitted",
+    });
 
     res.json({ claim: appealClaimRow, stediClaim, stediResponse });
   } catch (err) {

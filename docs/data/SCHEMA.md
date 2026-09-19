@@ -21,8 +21,8 @@ things here look like oversights and are not.
 
 Today: **Notion**, one database per entity. That choice is about compliance,
 not fit — the prototype holds only synthetic data, so it needs no BAA, no
-encryption at rest, and no audit logging. A real patient record could not sit
-here.
+encryption at rest, and no tamper-evident audit trail. A real patient record
+could not sit here.
 
 Tomorrow: **Postgres**, or whatever the production system brings.
 
@@ -38,7 +38,7 @@ it costs one file, not a rewrite.
 
 ## The entities
 
-Seven, plus one that is modelled nowhere (see the last row).
+Eight, plus one that is modelled nowhere (see the last row).
 
 | Entity | Notion DB | ID prefix | What it is |
 |---|---|---|---|
@@ -49,6 +49,7 @@ Seven, plus one that is modelled nowhere (see the last row).
 | **Claim** | Claims | `CL001` | A claim built from a specific artifact. Corrections and secondary filings are new rows chained to the original. |
 | **PayerFeedback** | Payer Feedback | `PF001` | What came back after submission — a 277CA acknowledgment or an 835 remittance. |
 | **Document** | Documents | `D001` | A file attached to a patient, optionally scoped to a case. A reserved slot: the schema exists, the upload and extraction UI does not. |
+| **AuditLog** | Audit Log | `LOG001` | Who did what to which claim or artifact, when. Append-only; written at named call sites only, through `backend/src/auditLog.js`. Not tamper-evident (see Settled decisions). |
 | *ProviderProfile* | — | `default` | The billing provider's NPI, tax ID, taxonomy and address. **Not an entity** — a JSON file on ephemeral disk (`backend/src/providerProfiles.js`), keyed by `providerId` so it can become a table without touching call sites. `Claim.provider_id` and `Artifact.provider_id` point at it. |
 
 ---
@@ -89,6 +90,16 @@ In words:
   independent of `parent_claim_id` and plays no part in chain traversal.
 - A **document** belongs to a patient and optionally narrows to a case. It
   attaches to no encounter.
+- An **audit log entry** points at one **claim** or **artifact** by
+  `(entity_type, entity_id)` and at a provider by `provider_id`. It is written
+  after the write it describes and never blocks it: `recordAudit()` swallows
+  and shouts. `entity_id` may be empty — that is the entry for an artifact
+  write that failed before it had an id, and `detail` carries the encounter
+  and stage instead. Entries are written at exactly these points: claim
+  created (draft, correction, appeal), claim status changed (submission, and
+  the payer's verdict from an 835), artifact created (pipeline and provider
+  edit) including a failed save. `deleteClaim`, `closeCase` and
+  `setPayerClaimControlNumber` are **not** logged yet.
 
 **Every foreign key is soft** — a plain text property holding another row's
 business ID, not a Notion relation. That is on purpose: it keeps the adapter's
@@ -130,7 +141,8 @@ both, together, always.
 **Vocabularies** (the `select` values) are declared as module constants at the
 top of `NotionRepository.js` and validated on write: `STAGES`,
 `CREATED_BY_VALUES`, `CLAIM_TYPES`, `CLAIM_STATUSES`, `DOCUMENT_SOURCES`,
-`FEEDBACK_TYPES`, `PATIENT_SEXES`, `INSURANCE_STATUSES`. **A new select property gets a constant and a write-time
+`FEEDBACK_TYPES`, `PATIENT_SEXES`, `INSURANCE_STATUSES`, `AUDIT_ENTITY_TYPES`,
+`AUDIT_ACTIONS`. **A new select property gets a constant and a write-time
 check.** Two current properties do not have one — `claim_status` and
 `recommended_route` on PayerFeedback take their values from
 `analyzeRemittance.js` instead, so the repository cannot reject a value it
@@ -159,6 +171,8 @@ These two are inconsistent with each other; the audit may say so.
 | `PayerFeedback.feedback_type` | `acknowledgment`, `remittance` |
 | `Document.source` | `upload`, `fax`, `ehr_sync` |
 | `Document.extraction_status` | `none` (only value written today) |
+| `AuditLog.entity_type` | `claim`, `artifact` |
+| `AuditLog.action` | `created`, `edited`, `status_changed`, `submitted`, `approved` (`submitted`/`approved` are declared, not yet written — submission is recorded as `status_changed`) |
 
 `Claim.status` also drives the UI: it decides whether an encounter is
 editable (anything past `draft` locks the record) and which actions a claim
@@ -198,10 +212,16 @@ from.
 uploads, which need a parser and a file store before they can exist. An empty
 slot is not an unfinished feature.
 
-**No encryption at rest, no audit log, no retention policy.** Prototype, and
-the reason synthetic-only is a hard rule rather than a preference. The audit
-should still list the missing compliance fields — knowing the size of the gap
-is the point — but their absence is not news.
+**No encryption at rest, no retention policy, and an audit log that is not
+tamper-evident.** Prototype, and the reason synthetic-only is a hard rule
+rather than a preference. The audit log exists and records the actor and
+action for claim and artifact writes, but it lives in the same Notion store
+as everything else and is editable by anyone with page access — the same
+exposure the PHI/HIPAA compliance notes already flag. Reporting that it is
+not append-only *in storage* is not a finding; reporting a write path that
+skips it, or a new way to update or delete a log row, is. The audit should
+still list the missing compliance fields — knowing the size of the gap is the
+point — but their absence is not news.
 
 ---
 

@@ -16,6 +16,7 @@ function fakeNotionClient() {
     claims: new Map(),
     documents: new Map(),
     payerFeedback: new Map(),
+    auditLog: new Map(),
   };
   let nextPageId = 1;
 
@@ -27,6 +28,7 @@ function fakeNotionClient() {
     if (dataSourceId === "ds_claims") return stores.claims;
     if (dataSourceId === "ds_documents") return stores.documents;
     if (dataSourceId === "ds_payer_feedback") return stores.payerFeedback;
+    if (dataSourceId === "ds_audit_log") return stores.auditLog;
     throw new Error(`fakeNotionClient: unknown data source '${dataSourceId}'`);
   }
 
@@ -116,6 +118,7 @@ function makeRepository() {
     claimsDataSourceId: "ds_claims",
     documentsDataSourceId: "ds_documents",
     payerFeedbackDataSourceId: "ds_payer_feedback",
+    auditLogDataSourceId: "ds_audit_log",
   });
 }
 
@@ -495,6 +498,75 @@ test("provider_id is optional, and a row written before it existed reads as null
   for (const page of repo.client._stores.artifacts.values()) delete page.properties.provider_id;
   assert.equal((await repo.getClaim(claim.claimId)).providerId, null);
   assert.equal((await repo.getLatestArtifact(encounter.encounterId, "claim")).providerId, null);
+});
+
+test("createLogEntry writes a row and getLogForEntity reads it back, oldest first", async () => {
+  const repo = makeRepository();
+  const first = await repo.createLogEntry({
+    providerId: "default",
+    entityType: "claim",
+    entityId: "CL001",
+    action: "created",
+    detail: "draft from A001",
+  });
+  assert.equal(first.logId, "LOG001");
+  await repo.createLogEntry({
+    providerId: "default",
+    entityType: "claim",
+    entityId: "CL001",
+    action: "status_changed",
+    detail: "status: draft -> submitted",
+  });
+  // A different entity's entry must not leak into the first one's trail.
+  await repo.createLogEntry({ providerId: "default", entityType: "claim", entityId: "CL002", action: "created" });
+
+  const trail = await repo.getLogForEntity("claim", "CL001");
+  assert.deepEqual(
+    trail.map((e) => [e.logId, e.action, e.detail]),
+    [
+      ["LOG001", "created", "draft from A001"],
+      ["LOG002", "status_changed", "status: draft -> submitted"],
+    ]
+  );
+  assert.equal(trail[0].providerId, "default");
+  assert.equal(trail[0].entityType, "claim");
+});
+
+test("createLogEntry accepts an empty entityId for a write that failed before it had one", async () => {
+  const repo = makeRepository();
+  const entry = await repo.createLogEntry({
+    providerId: "default",
+    entityType: "artifact",
+    action: "created",
+    detail: "persist failed · encounter E001 · stage facts · Notion is down",
+  });
+  assert.equal(entry.entityId, null);
+  assert.match(entry.detail, /E001/);
+});
+
+test("createLogEntry rejects an unknown entity type or action", async () => {
+  const repo = makeRepository();
+  await assert.rejects(
+    () => repo.createLogEntry({ providerId: "default", entityType: "encounter", entityId: "E001", action: "created" }),
+    NotionRepositoryError
+  );
+  await assert.rejects(
+    () => repo.createLogEntry({ providerId: "default", entityType: "claim", entityId: "CL001", action: "deleted" }),
+    NotionRepositoryError
+  );
+});
+
+test("audit log methods throw a clear config error when the data source is not configured", async () => {
+  const repo = new NotionRepository({
+    client: fakeNotionClient(),
+    patientsDataSourceId: "ds_patients",
+    casesDataSourceId: "ds_cases",
+  });
+  await assert.rejects(
+    () => repo.createLogEntry({ providerId: "default", entityType: "claim", entityId: "CL001", action: "created" }),
+    /auditLogDataSourceId/
+  );
+  await assert.rejects(() => repo.getLogForEntity("claim", "CL001"), /auditLogDataSourceId/);
 });
 
 test("createClaim rejects an encounterId, artifactId, or parentClaimId that doesn't exist", async () => {

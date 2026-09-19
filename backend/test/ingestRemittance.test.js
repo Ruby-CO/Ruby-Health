@@ -10,7 +10,7 @@ const adjustmentCodes = await loadAdjustmentCodes();
 // than the fake Notion client in NotionRepository.test.js on purpose -- what
 // is under test here is the orchestration, not the persistence.
 function stubRepository({ claim = { claimId: "CL001", status: "submitted", payerClaimControlNumber: null } } = {}) {
-  const calls = { feedback: [], statusUpdates: [], controlNumbers: [] };
+  const calls = { feedback: [], statusUpdates: [], controlNumbers: [], audit: [] };
   return {
     calls,
     async getClaim(claimId) {
@@ -27,6 +27,10 @@ function stubRepository({ claim = { claimId: "CL001", status: "submitted", payer
     async updateClaimStatus(claimId, status) {
       calls.statusUpdates.push({ claimId, status });
       return { ...claim, status };
+    },
+    async createLogEntry(entry) {
+      calls.audit.push(entry);
+      return { logId: `LOG00${calls.audit.length}`, ...entry };
     },
   };
 }
@@ -100,6 +104,18 @@ test("ingesting a denial files the feedback and moves the claim to denied", asyn
   assert.equal(filed.feedbackType, "remittance");
   assert.equal(filed.claimStatus, "denied");
   assert.equal(filed.recommendedRoute, "appeal");
+
+  // The payer's verdict is the one status change nobody at Ruby made, so the
+  // log attributes it to the claim's own provider and says the 835 drove it.
+  assert.deepEqual(repository.calls.audit, [
+    {
+      providerId: "default",
+      entityType: "claim",
+      entityId: "CL001",
+      action: "status_changed",
+      detail: "status: submitted -> denied (835)",
+    },
+  ]);
   assert.equal(filed.amountAtRisk, 150);
   // The date comes off the document, not off the clock.
   assert.equal(filed.receivedAt, "2026-09-05");

@@ -25,6 +25,9 @@ export function createNotionRepositoryFromEnv(env = process.env) {
   // mandatory would take persistence down entirely on any deploy that hasn't
   // added it yet. Payer-feedback methods throw a clear config error instead.
   const payerFeedbackDataSourceId = env.NOTION_PAYER_FEEDBACK_DATA_SOURCE_ID;
+  // Optional for the same reason. Without it, log writes are skipped with a
+  // console warning (see auditLog.js) and nothing else changes.
+  const auditLogDataSourceId = env.NOTION_AUDIT_LOG_DATA_SOURCE_ID;
 
   const missing = [
     !apiKey && "NOTION_API_KEY",
@@ -48,6 +51,7 @@ export function createNotionRepositoryFromEnv(env = process.env) {
     claimsDataSourceId,
     documentsDataSourceId,
     payerFeedbackDataSourceId,
+    auditLogDataSourceId,
   });
 }
 
