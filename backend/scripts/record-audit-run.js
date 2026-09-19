@@ -60,7 +60,16 @@ if (dryRun) {
 
 const apiKey = process.env.NOTION_API_KEY;
 const dataSourceId = process.env.NOTION_AUDIT_LOG_DATA_SOURCE_ID || DEFAULT_DATA_SOURCE;
-if (!apiKey) fail("NOTION_API_KEY is not set.");
+// Skips rather than fails when the token is absent, matching the deploy step
+// in ci.yml: a workflow should not go red because a secret has not been added
+// yet, and the agent run that precedes this one costs real money -- losing it
+// to a red step would be the expensive kind of failure.
+if (!apiKey) {
+  console.log("NOTION_API_KEY is not set -- not filing this run.");
+  console.log("Add it under Settings > Secrets and variables > Actions, and share the Notion");
+  console.log("integration with the destination (open it -> ... -> Connections).");
+  process.exit(0);
+}
 
 const notion = new Client({ auth: apiKey });
 
