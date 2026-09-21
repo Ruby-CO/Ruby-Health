@@ -15,6 +15,7 @@ import { submitToStedi, StediSubmissionError } from "./pipeline/submitToStedi.js
 import { annotateValidation, unrecognisedCodes } from "./pipeline/validateCodes.js";
 import { usageTotals } from "./usage.js";
 import { persistenceFailure } from "./persistence.js";
+import { pickOriginalDraft } from "./draftClaim.js";
 import { loadCodeSet } from "../../reference/loadCodes.mjs";
 import { createNotionRepositoryFromEnv, createBlobStoreFromEnv, NotionRepositoryError } from "./repository/index.js";
 import { RemittanceParseError } from "./pipeline/parseRemittance.js";
@@ -215,7 +216,7 @@ async function findDraftClaim(encounterId) {
   if (!repository || !encounterId) return null;
   try {
     const claims = await repository.listClaimsForEncounter(encounterId);
-    return [...claims].reverse().find((c) => c.status === "draft") || null;
+    return pickOriginalDraft(claims);
   } catch (err) {
     console.error(`Looking up the draft claim for encounter '${encounterId}' failed:`, err);
     return null;
@@ -978,7 +979,7 @@ async function persistSubmittedClaim(encounterId, claim, providerId) {
   if (!repository || !encounterId) return;
   try {
     const existingClaims = await repository.listClaimsForEncounter(encounterId);
-    const draft = [...existingClaims].reverse().find((c) => c.status === "draft");
+    const draft = pickOriginalDraft(existingClaims);
     if (draft) {
       await repository.updateClaimStatus(draft.claimId, "submitted");
       await recordAudit(repository, {
