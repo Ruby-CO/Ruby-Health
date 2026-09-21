@@ -1,7 +1,11 @@
+<!-- audit-meta
+{"runAt": "2026-09-19T03:02:00Z", "commit": "3e3fa3e", "introspection": "live-verified", "label": "Output check, and P2 catch-up", "headline": "Run to check the agent's output is clean \u2014 it is \u2014 and it found seven new things, three of them worth a decision."}
+-->
+
 # Ruby Health — data model audit
 
-**Date:** 2026-09-13
-**Commit:** `01da664`
+**Date:** 2026-09-19
+**Commit:** `3e3fa3e`
 **Introspection mode:** live-verified — the seven Notion databases under the
 "Ruby App Data (Chunk 1 — synthetic only)" page were fetched and their property
 schemas read. Property names, types and select option lists in
@@ -15,34 +19,64 @@ The ERD was verified to parse with `mermaid.parse()`.
 
 ## Summary
 
-The store and the code now agree on shape. Every property in all seven live
-Notion databases is both written and parsed by `NotionRepository.js`, every
-type matches its accessor, and there is no orphan column and no phantom field.
-That is the good news, and it is not nothing — the last audit could not say it.
+The store and the code still agree on shape, exactly as they did six days ago.
+All seven live databases are unchanged, every property is both written and
+parsed by `NotionRepository.js`, and `NotionRepository.js` itself has not been
+touched since the last audit — so there is no drift between the database and
+the application to report this run.
 
-The gap has moved to the edges. PR #27 closed the four mismatches that mattered
-most: the claim now takes its date of service from the encounter and its
-patient name and date of birth from the Patient row, it sends its own id to the
-payer so the remittance can be matched back, a second populate repoints the
-existing draft instead of filing a sibling, and a failed save is now reported to
-the provider instead of ticking green. What remains is the second half of that
-same work. The claim identifier is sent on the first submission but not on a
-correction or an appeal, and nothing on the way back in ever reads it; the
-subscriber's member ID and the payer's name are still literals sitting in typed
-columns that were built to hold real ones; and the exact 837P Ruby transmits —
-including every dollar it billed — is kept nowhere at all.
+The movement is all in the claim paths, and it cuts both ways. PR #29 closed the
+two high findings it was aimed at: a correction and an appeal now create their
+Claim row before the payload is mapped, so they go to the payer carrying a real
+claim id, and a remittance is now matched on CLP01 instead of being filed against
+whichever claim happened to come first in the document. But creating that row
+earlier means a submission that fails now leaves a `corrected` draft behind on
+the encounter, and the original claim path adopts the newest draft it finds
+without checking what kind it is — so a rejected correction can quietly turn the
+next ordinary claim into an amendment of an older one. PR #30 fixed a real
+truncation bug in two of the four stages that call a model; the stage it did not
+fix is the one whose output is written to an artifact and sent to a payer.
 
-Of the twenty-five findings below, fifteen are carried forward unchanged, five
-are carried forward changed by PR #23, #24 or #27 (S4, S5, C4, C5, M2 — each
-says how), and five are new (S2, S7, S8, C3, M1). Four findings from the last
-run are gone, verified in the code rather than inferred: the old M1, M2, M3 and
-S4. Read S2, C3 and M1 first.
+Thirty findings below: nine high, seventeen medium, four low. Seven are new
+(S1, S5, S6, C2, C5, M2, M5), twenty-three are carried forward unchanged, and
+two from the last run are closed — verified in the code, not inferred from a
+commit message. Read S1, C2 and M2 first.
 
 ---
 
 ## 1. Structural risks
 
-### S1. Sequential IDs are minted without atomicity, and reads resolve a collision silently
+### S1. A correction or appeal that fails at submission leaves a draft row the original claim path adopts
+
+- **What:** Both resubmission paths now create the Claim row as a `draft` before
+  mapping and submitting, and promote it to `submitted` only after Stedi
+  accepts. A mapping error or a rejected submission leaves a `corrected` draft
+  on the encounter — and `findDraftClaim` and `persistSubmittedClaim` both take
+  the newest draft on an encounter without checking its `claim_type` or its
+  `parent_claim_id`.
+- **Where:** `backend/src/server.js:1053-1077` (corrected) and `:1161-1185`
+  (appeal), against `:186-195` (`findDraftClaim`), `:820-849`
+  (`persistClaimDraft`) and `:916-942` (`persistSubmittedClaim`).
+- **Severity:** high
+- **Why it matters:** Three concrete failures, all silent. `/api/submit-claim`
+  attaches the newest draft's id to an ordinary claim (`:963-966`), so a fresh
+  original claim goes out to the payer under the abandoned correction's
+  `claim_id`, and the payer's 835 then matches that row instead. `persistClaimDraft`
+  repoints the abandoned correction at the new claim-stage artifact (`:835`), so
+  a `corrected` row chained by `parent_claim_id` to an older claim now cites an
+  artifact for an unrelated draft. `persistSubmittedClaim` then marks it
+  `submitted` (`:922`). The encounter ends up billed once and recorded as an
+  amendment of something else. Repeated failures compound it: each retry calls
+  `createClaim` again, so a second and third orphan draft accumulate with no
+  dedup.
+- **Proposed change:** Have `findDraftClaim` and `persistSubmittedClaim` match
+  on `claimType === "original"` and an empty `parentClaimId`, and have the two
+  resubmission paths clean up after themselves — delete the draft row (the
+  existing `deleteClaim` already permits it: draft, no children) when submission
+  fails. Route and helper changes only; no schema change, no migration. Existing
+  orphan drafts, if any, would need a one-off look.
+
+### S2. Sequential IDs are minted without atomicity, and reads resolve a collision silently
 
 - **What:** Two overlapping creates in the same database scan the same maximum
   title and mint the same ID; `_findByTitle` then returns whichever row the
@@ -59,35 +93,16 @@ S4. Read S2, C3 and M1 first.
 - **Proposed change:** After creating a row, re-query the title and fail loudly
   if more than one exists, so a collision surfaces instead of persisting. The
   real repair is UUIDs, which `SCHEMA.md` already reserves for production. No
-  migration for the check; the UUID switch is a full one.
-
-### S2. A remittance is filed against whichever claim happens to come first in the document
-
-- **What:** `ingestRemittance` parses every CLP loop in the 835 and then uses
-  `parsedClaims[0]`, without ever comparing that claim's `patientControlNumber`
-  to the `claimId` it was called for.
-- **Where:** `backend/src/pipeline/ingestRemittance.js:74-76`, then `:93-113`.
-- **Severity:** high
-- **Why it matters:** A real 835 routinely covers many claims. If the document
-  handed to `POST /api/claims/CL004/remittance` lists `CL002` first, Ruby writes
-  `CL002`'s verdict, control number and amount at risk onto `CL004` — it sets
-  `CL004`'s status from another claim's adjudication and stamps another claim's
-  payer control number onto it, which is the one field a corrected claim cannot
-  be filed without. The result is a correction filed under the wrong ICN, which
-  the payer denies as a duplicate. `parseRemittance.js:221` already returns the
-  identifier that would prevent this, and its own comment says so; nothing reads
-  it.
-- **Proposed change:** Select the CLP loop whose `patientControlNumber` matches
-  the claim, and refuse with a named error when none does rather than defaulting
-  to the first. Optionally file the other loops against their own claims in the
-  same pass. Pipeline only; no schema change, no migration.
+  migration for the check; the UUID switch is a full one. See also the Revisit
+  section — the claim id is now an externally-visible reconciliation key, which
+  changes what this costs.
 
 ### S3. `getClaimChain` dereferences an unchecked lookup and has no cycle guard
 
 - **What:** The chain root can be `undefined`, and a `parent_claim_id` cycle
   makes both the walk up and the walk down loop forever.
-- **Where:** `backend/src/repository/NotionRepository.js:662-665` (root walk)
-  and `:667-675` (breadth-first descent, no visited set).
+- **Where:** `NotionRepository.js:662-665` (root walk) and `:667-675`
+  (breadth-first descent, no visited set).
 - **Severity:** high
 - **Why it matters:** `root = claimsById.get(claimId)` assumes the claim appears
   in its own encounter's list; if the claim's `encounter_id` was ever edited in
@@ -103,9 +118,9 @@ S4. Read S2, C3 and M1 first.
 
 - **What:** `createClaim` verifies that the encounter exists and that the
   artifact exists, but never that they belong together or that the artifact is a
-  claim-stage one. The method added in PR #27 to repoint a claim checks exactly
-  those two things.
-- **Where:** `NotionRepository.js:428-461` (`createClaim`, artifact lookup at
+  claim-stage one. The method added to repoint a claim checks exactly those two
+  things.
+- **Where:** `NotionRepository.js:428-462` (`createClaim`, artifact lookup at
   `:439-440`) against `:492-531` (`updateClaimArtifact`, checks at `:515` and
   `:520`).
 - **Severity:** medium
@@ -113,7 +128,7 @@ S4. Read S2, C3 and M1 first.
   a submitted claim still resolve to the record it was built from. A claim
   created against another encounter's artifact cites someone else's visit, and
   because `getArtifactHistory` is keyed by encounter, nothing in the UI would
-  ever surface the mismatch. The repository now holds two rules for the same
+  ever surface the mismatch. The repository holds two rules for the same
   invariant, one enforced and one not, which is the state most likely to be read
   as "already handled".
 - **Proposed change:** Lift the encounter-match and stage checks out of
@@ -122,7 +137,53 @@ S4. Read S2, C3 and M1 first.
   one-off scan for claims whose artifact belongs elsewhere is worth running
   alongside.
 
-### S5. Artifact content is chunked but the number of chunks is unbounded
+### S5. A Claim's `artifact_id` is written and never read back, and the resubmission paths guess instead
+
+- **What:** There is no repository method that resolves an artifact by its id —
+  `Repository.js` offers only `getArtifactHistory(encounterId)` and
+  `getLatestArtifact(encounterId, stage)`. So the correction and appeal paths
+  rebuild from `getLatestArtifact(encounterId, "claim")` rather than from the
+  artifact the claim they are correcting actually points at.
+- **Where:** `Repository.js:94-112` (no by-id accessor) and the `artifact_id`
+  column at `NotionRepository.js:453`; used at `server.js:1023` (corrected) and
+  `:1143` (appeal).
+- **Severity:** medium
+- **Why it matters:** An encounter accumulates claim-stage artifacts — one per
+  populate, one per correction, one per appeal. Correcting `CL004` after
+  `CL005` was already filed builds the correction from `CL005`'s artifact, so
+  the payer receives a replacement for `CL004` whose content was never on
+  `CL004`. The column that would prevent this is populated on every row and
+  documented in Notion as "the claim-stage artifact this was built from"; it is
+  the schema's own answer and nothing can ask it. It also makes S4 unverifiable
+  in practice: a mispointed `artifact_id` has no reader that would notice.
+- **Proposed change:** Add `getArtifact(artifactId)` to `Repository.js` and
+  `NotionRepository` (the `_findByTitle` helper already does the work), and have
+  both resubmission paths read `original.artifactId` instead of the encounter's
+  latest. Interface addition plus two route changes; no schema change, no
+  migration.
+
+### S6. The Context artifact is written only as a side effect of a successful extraction
+
+- **What:** On the New Claim path, the provider's own context — the recorded,
+  pasted or typed conversation — reaches the store only inside `/api/extract`'s
+  success branch, after the model call returns.
+- **Where:** `backend/src/server.js:734-751`; the two `persistArtifact` calls at
+  `:749-750` sit below `extractClinicalFacts` at `:735`.
+- **Severity:** medium
+- **Why it matters:** PR #30 made a truncated response throw
+  (`extract.js:63-65`) where it previously returned empty facts. That is right
+  for the facts, and it has a side effect nobody chose: an extraction that
+  fails now stores nothing at all, including the transcript, which had nothing
+  to do with the failure. The context exists only in the browser tab until a
+  model call succeeds. The UI keeps it on screen and offers a retry, so the
+  loss needs a failure plus a closed tab — but the thing lost is the source
+  record every other artifact is derived from, and it is the one piece the
+  provider cannot regenerate.
+- **Proposed change:** Persist the transcript artifact before calling the model,
+  not after — it does not depend on the result. Route change only; no schema
+  change, no migration.
+
+### S7. Artifact content is chunked but the number of chunks is unbounded
 
 - **What:** `content` is split at 2000 characters with no ceiling on how many
   items result.
@@ -130,18 +191,17 @@ S4. Read S2, C3 and M1 first.
 - **Severity:** medium
 - **Why it matters:** A Notion rich_text property holds at most ~100 items of
   2000 characters. A long transcript above that is rejected by the API. The
-  reporting half of this is now fixed — `persistArtifact` returns
+  reporting half of this is handled — `persistArtifact` returns
   `{ saved: false }` and `persistenceFailure` surfaces it, so the provider is
-  told (`backend/src/server.js:150`, `backend/src/persistence.js:18`) — which
-  downgrades this from silent data loss to a visible failure the provider cannot
-  do anything about. The write still fails at the API rather than at a check
-  that could say why.
+  told (`server.js:150`, `backend/src/persistence.js:18`) — which makes this a
+  visible failure rather than silent loss. The write still fails at the API
+  rather than at a check that could say why.
 - **Proposed change:** Have `createArtifact` refuse over-ceiling content with a
   named error naming the limit, so the message reaching the provider says "this
   transcript is too long to store" rather than a Notion validation error.
   Repository only; no migration.
 
-### S6. Four live select vocabularies that no repository constant covers
+### S8. Four live select vocabularies that no repository constant covers
 
 - **What:** Four live select properties have option sets the repository does not
   declare or validate on write.
@@ -160,22 +220,25 @@ S4. Read S2, C3 and M1 first.
   lists match those modules exactly today, and nothing keeps them matching.
   `SCHEMA.md`'s own rule is that a select property gets a constant and a
   write-time check. Encounter status is the sharpest case: the only check on it
-  lives in `backend/src/server.js:518`, so any other caller of `updateEncounterStatus`
-  writes free text into a select. (`SCHEMA.md`'s status table is also now stale
-  on this point — it says `draft` is the only encounter status written, but
-  `persistSubmittedClaim` has written `submitted` since PR #27.)
+  lives in `server.js:518`, so any other caller of `updateEncounterStatus`
+  writes free text into a select. `SCHEMA.md` is also stale on this in two
+  places, both outside Settled decisions: its status table says
+  `Encounter.status` has `draft` as the only value written today, but
+  `persistSubmittedClaim` has written `submitted` since PR #27
+  (`server.js:938`); and its Vocabularies paragraph says two properties lack a
+  constant, where the live count is four.
 - **Proposed change:** Add `ENCOUNTER_STATUSES`, `EXTRACTION_STATUSES`,
   `FEEDBACK_CLAIM_STATUSES` and `RECOMMENDED_ROUTES` as module constants and
-  validate on write; correct the `SCHEMA.md` row for encounter status. No
-  migration — the live option sets already match the values the code produces,
-  so this guards against future drift rather than rewriting anything.
+  validate on write; correct both `SCHEMA.md` statements. No migration — the
+  live option sets already match the values the code produces, so this guards
+  against future drift rather than rewriting anything.
 
-### S7. Rows outlive the blobs their `storage_ref` points at
+### S9. Rows outlive the blobs their `storage_ref` points at
 
 - **What:** `storage_ref` on Documents and Payer Feedback is a key into
   `LocalDiskBlobStore`, which writes to a directory on Render's ephemeral disk.
 - **Where:** `backend/src/repository/LocalDiskBlobStore.js:1-13`;
-  `backend/src/pipeline/ingestRemittance.js:87`; `NotionRepository.js:617` and
+  `backend/src/pipeline/ingestRemittance.js:106`; `NotionRepository.js:617` and
   `:703`.
 - **Severity:** medium
 - **Why it matters:** The Notion row survives a redeploy and the file does not,
@@ -192,13 +255,13 @@ S4. Read S2, C3 and M1 first.
   inline is a pipeline change with no migration, since old rows simply keep a
   ref that resolves to nothing.
 
-### S8. The shared placeholder Patient is found by matching a free-text name
+### S10. The shared placeholder Patient is found by matching a free-text name
 
 - **What:** Encounters recorded before a patient is attached all file under one
   `Unidentified Patient` row, located by scanning every patient for that exact
   name string and cached in a module-level variable.
-- **Where:** `backend/src/server.js:202-212` (`getOrCreateUnidentifiedPatient`),
-  used by `autoProvisionEncounter` at `:225`.
+- **Where:** `server.js:202-213` (`getOrCreateUnidentifiedPatient`), used by
+  `autoProvisionEncounter` at `:225`.
 - **Severity:** medium
 - **Why it matters:** Three separate ways this drifts. Rename the row in Notion
   and the next request creates a second placeholder, splitting the unattached
@@ -207,13 +270,14 @@ S4. Read S2, C3 and M1 first.
   placeholder — it is an ordinary Patient with a DOB of `1900-01-01`, so it
   appears in `listPatients`, in the Patients route, and in any future count of
   patients on file, carrying the cases of many unrelated people under one
-  `patient_id`.
+  `patient_id`. C2 below is what happens when that row also becomes the eval
+  suite's landing zone.
 - **Proposed change:** Give Patient a boolean or select property marking a
   system-created placeholder and look the row up by that instead of by name;
   it also lets the Patients list filter it out. One additive Notion property
   plus a one-row backfill.
 
-### S9. Every free-text read returns only the first rich_text item
+### S11. Every free-text read returns only the first rich_text item
 
 - **What:** `richText` reads `rich_text[0]` and drops the rest; only
   `richTextAll` rejoins chunks, and it is used for `content` alone.
@@ -227,7 +291,7 @@ S4. Read S2, C3 and M1 first.
 - **Proposed change:** Use `richTextAll` for every rich_text read and delete
   `richText`. Repository only; no migration.
 
-### S10. `createClaim` queries the Artifacts data source without its configuration guard
+### S12. `createClaim` queries the Artifacts data source without its configuration guard
 
 - **What:** The artifact lookup uses `this.artifactsDataSourceId` after calling
   only `_requireClaimsDataSource()`.
@@ -250,24 +314,24 @@ S4. Read S2, C3 and M1 first.
 - **What:** `STAGES` and `CREATED_BY_VALUES` are duplicated verbatim in the
   server as `ENCOUNTER_ARTIFACT_STAGES` and `ARTIFACT_AUTHORS`, and
   `ENCOUNTER_STATUSES` exists only in the server.
-- **Where:** `NotionRepository.js:23-24` against `backend/src/server.js:484`,
-  `:488` and `:518`.
+- **Where:** `NotionRepository.js:23-24` against `server.js:484`, `:488` and
+  `:518`.
 - **Severity:** medium
 - **Why it matters:** `SCHEMA.md` places vocabularies in the repository,
   validated on write. With two copies, adding a stage in one file gives either an
   endpoint that accepts a value the repository rejects, or a repository that
   accepts a value no endpoint can send — and the failure only appears at runtime
   on the one path using the stale list. Encounter status is worse: the server
-  list is the *only* check (see S6).
+  list is the *only* check (see S8).
 - **Proposed change:** Export the constants from `NotionRepository.js` and
   import them in `server.js`. No migration.
 
 ### N2. `created_at` is read from a property that exists on one database in seven
 
 - **What:** Only Patients carries a real `created_at` created_time property —
-  confirmed live. Every other parser falls back to the Notion page's own
-  `created_time`, and `parseCase` is the one parser that exposes no `createdAt`
-  at all.
+  confirmed live again this run. Every other parser falls back to the Notion
+  page's own `created_time`, and `parseCase` is the one parser that exposes no
+  `createdAt` at all.
 - **Where:** `NotionRepository.js:75`, `:97`, `:110`, `:127`, `:150`, `:171`
   against `parseCase` at `:79-88`; live schemas for all seven databases.
 - **Severity:** medium
@@ -326,7 +390,36 @@ policy. Listed so the size of the gap is known.*
   property per entity you choose to mark; a one-time backfill of existing rows
   to `synthetic`.
 
-### C2. No actor identity on any write
+### C2. An eval run writes encounters into the same store as the product, indistinguishably
+
+- **What:** `eval/run.mjs` posts each of the 20 fixtures to `/api/extract` with
+  no `encounterId`. That is the auto-provision path: for every fixture the
+  server creates a Case and an Encounter under the shared `Unidentified Patient`
+  row, plus a transcript artifact and a facts artifact. Nothing marks any of
+  those rows as test data.
+- **Where:** `eval/run.mjs:69-70` against `server.js:743-751` and `:222-235`
+  (`autoProvisionEncounter`); `eval/results/README.md` records two live runs on
+  2026-09-13.
+- **Severity:** high
+- **Why it matters:** A single eval run files 20 cases, 20 encounters and 40
+  artifacts that are shaped exactly like a provider's work — they show up in the
+  Patients route, in the activity feed, and in any count of visits on file, all
+  hanging off the one placeholder patient (S10). Two baseline runs are recorded
+  in the repository, so this has already happened twice against whatever server
+  those runs pointed at. The store cannot tell which encounters a clinician
+  created and which a test harness did, which makes "what has this practice
+  actually done" unanswerable, and it inflates the scan `_nextSequentialId`
+  performs on every create. This audit reads schema only, so whether those rows
+  are in the workspace today was not checked — the code path that writes them is
+  what is being reported.
+- **Proposed change:** Two options, and they are complementary. Give the eval
+  runner a header or flag that suppresses persistence for the run — the cheapest
+  fix, one condition in `/api/extract`. And add the `data_class`-style origin
+  marking of C1 with an `eval` value, so anything already written can be found
+  and filtered. The suppression is a route change with no migration; the marking
+  is one additive property plus a backfill decision about existing rows.
+
+### C3. No actor identity on any write
 
 - **What:** `Artifact.created_by` distinguishes `system` from `provider_edit`
   and nothing else. No entity records *which* person acted, and there is no user
@@ -347,12 +440,12 @@ policy. Listed so the size of the gap is known.*
   interface in `Repository.js` carries the parameter from the start rather than
   gaining it later on every method.
 
-### C3. Nothing records what was actually transmitted to the payer
+### C4. Nothing records what was actually transmitted to the payer
 
 - **What:** The 837P payload Ruby sends — including the dollar amount it bills —
   is built at submission time, sent, returned to the browser and never stored.
 - **Where:** `buildStediClaim.js:109-111` (`claimChargeAmount`, a flat
-  `100.00` per line) and `:113-185`; `server.js:970-978` returns `stediClaim` in
+  `100.00` per line) and `:113-185`; `server.js:979-990` returns `stediClaim` in
   the response and persists nothing; the claim-stage artifact holds
   `populateClaim`'s output, which has no charge amounts.
 - **Severity:** high
@@ -374,43 +467,69 @@ policy. Listed so the size of the gap is known.*
   property, no rewrite of existing rows (which simply have no submission
   artifact).
 
-### C4. The schema has nowhere to put a retention or deletion decision
+### C5. No artifact records which model produced it, or that a model was involved at all
+
+- **What:** A derived artifact — `facts`, `codes`, or a claim built from them —
+  carries `created_by: "system"` and nothing else about its provenance: not the
+  model ID, not the prompt, not the output cap, not the stop reason.
+- **Where:** `NotionRepository.js:24` (`CREATED_BY_VALUES`) and `:370-402`
+  (`createArtifact`); `server.js:41` and `:46` (both model IDs come from
+  `process.env` with a default); `usage.js` meters calls in memory only.
+- **Severity:** medium
+- **Why it matters:** PR #30 is the case in point. Before it, a response cut off
+  at the old 1024-token cap produced a facts or codes artifact with empty arrays
+  and no error, on roughly a third of encounters. Those rows are in the store
+  and are indistinguishable from an encounter that genuinely had nothing to
+  extract — there is no field that would let anyone find them and re-run them.
+  The model is also not fixed: it is read from `ANTHROPIC_MODEL` at boot, and
+  the recorded P2 baseline was produced on a different model from the committed
+  default (`eval/results/README.md`), so artifacts written by at least two
+  models now sit side by side with nothing to tell them apart. "Which of these
+  records did the model we are about to change write?" is the first question a
+  model swap asks, and the schema cannot answer it.
+- **Proposed change:** Add `model` and `stop_reason` rich_text properties to
+  Artifact, written on every system-created artifact and left empty for a
+  `provider_edit`. Two additive Notion properties, one change to
+  `createArtifact`'s signature and its callers; existing rows stay empty, which
+  is itself the honest answer for them.
+
+### C6. The schema has nowhere to put a retention or deletion decision
 
 - **What:** No `deleted_at`, no retention class, no tombstone on any entity —
-  and there is now a delete path.
+  and there is a delete path.
 - **Where:** All seven live databases; `NotionRepository.js:533-558`
   (`deleteClaim`, which sets `in_trash: true`).
 - **Severity:** medium
-- **Why it matters:** PR #23 added deletion without adding a record of it.
-  A deleted draft leaves nothing behind: no row, no timestamp, no note that
-  `CL006` ever existed, and the ID is not reused, so the Claims list simply has
-  a gap. The guards around it are good — only a draft, never one with children —
-  but the deletion itself is unrecorded, and "was a claim ever drafted for this
-  encounter and then withdrawn?" is not answerable. Separately, nothing in the
-  model expresses how long any record should be kept, which is the first
-  question a retention policy asks.
+- **Why it matters:** A deleted draft leaves nothing behind: no row, no
+  timestamp, no note that `CL006` ever existed, and the ID is not reused, so the
+  Claims list simply has a gap. The guards around it are good — only a draft,
+  never one with children — but the deletion itself is unrecorded, and "was a
+  claim ever drafted for this encounter and then withdrawn?" is not answerable.
+  S1 makes this sharper: the cleanest fix there is to delete an abandoned
+  correction, which under the current scheme would erase the fact that a
+  correction was attempted. Separately, nothing in the model expresses how long
+  any record should be kept, which is the first question a retention policy asks.
 - **Proposed change:** Replace the trash operation with a soft delete: a
-  `deleted_at` date plus a `deleted_by` actor (see C2), with every list method
+  `deleted_at` date plus a `deleted_by` actor (see C3), with every list method
   filtering them out. Additive properties; the behaviour change touches
   `deleteClaim` and every `list*` method, and existing trashed rows stay
   trashed.
 
-### C5. The claim asserts subscriber facts no row substantiates
+### C7. The claim asserts subscriber facts no row substantiates
 
 - **What:** The 837P states the subscriber's sex, member ID and address, and the
   payer's name and ID. None of the five has a home in the schema.
 - **Where:** `populateClaim.js:12-17` (`PLACEHOLDER_PATIENT`) and `:178-181`
-  (hardcoded payer); `buildStediClaim.js:126-138` (subscriber block, address
+  (hardcoded payer); `buildStediClaim.js:125-138` (subscriber block, address
   literal at `:132-137`).
 - **Severity:** medium
-- **Why it matters:** Narrowed but not closed by PR #27 — name and date of birth
-  now come from the Patient row, and the code is explicit that the rest stay
-  canned because "the schema carries no coverage". That is the finding: there is
-  no Coverage or Payer entity, so a claim can never be more than two-fifths real
-  no matter how complete the patient record is. `populateClaim` deliberately
-  does not warn on these, on the sound reasoning that a warning true of every
-  claim is decoration — which means the gap is now marked only at the fields in
-  the claim form.
+- **Why it matters:** Name and date of birth now come from the Patient row, and
+  the code is explicit that the rest stay canned because "the schema carries no
+  coverage". That is the finding: there is no Coverage or Payer entity, so a
+  claim can never be more than two-fifths real no matter how complete the
+  patient record is. `populateClaim` deliberately does not warn on these, on the
+  sound reasoning that a warning true of every claim is decoration — which means
+  the gap is now marked only at the fields in the claim form.
 - **Proposed change:** Add a Coverage entity (patient, payer name, payer ID,
   member ID, plan, effective dates) and a patient `sex` and address on Patient.
   This is the largest schema addition on the list — two new Notion databases'
@@ -418,11 +537,11 @@ policy. Listed so the size of the gap is known.*
   decides whether Ruby can ever produce a submittable claim rather than a
   demonstrable one. Worth scoping deliberately, not slipping in.
 
-### C6. A provider SSN slot is documented, read by nothing, and would be stored in plaintext
+### C8. A provider SSN slot is documented, read by nothing, and would be stored in plaintext
 
 - **What:** The provider profile shape documents an optional `ssn`; no code
   writes it, reads it, or validates it.
-- **Where:** `backend/src/providerProfiles.js:90` (JSDoc) against `:51-75`
+- **Where:** `backend/src/providerProfiles.js:90` (JSDoc) against `:53-75`
   (`validate`, which checks `name`, `npi`, `organization` and `ein` only);
   `buildStediClaim.js` never reads it.
 - **Severity:** low
@@ -439,31 +558,7 @@ policy. Listed so the size of the gap is known.*
 
 ## 4. Schema ↔ pipeline mismatches
 
-### M1. A corrected claim and an appeal go to the payer with a throwaway control number
-
-- **What:** Both resubmission paths call `buildStediClaim` *before* the Claim
-  row exists, so `claim.claimId` is undefined and the payload falls back to
-  `ruby-<timestamp>`.
-- **Where:** `server.js:1038` (corrected) and `:1136` (appeal), each followed by
-  `submitToStedi` and only then `createClaim` at `:1055` and `:1155`;
-  `buildStediClaim.js:162`. `buildCorrectedClaim.js` and `draftAppeal.js` never
-  set a `claimId`.
-- **Severity:** high
-- **Why it matters:** This is the unfixed half of the previous M3. `/api/submit-claim`
-  now looks up the draft and attaches its id (`server.js:963-966`), so an
-  original claim's 835 can be traced back. A correction and an appeal — the two
-  cases where matching the remittance matters *most*, because the money is
-  already in dispute — still send an identifier that exists nowhere in the
-  store. The payer echoes it back in CLP01 and it matches nothing, so filing the
-  response requires a human to name the claim, which is exactly what the fix was
-  meant to end.
-- **Proposed change:** Create the Claim row before building the Stedi payload
-  on both paths, and pass its id in; on failure, delete the row or leave it
-  `draft`. This reorders two route handlers and changes no schema. It pairs
-  naturally with C3 — if the submitted payload is written as an artifact, the
-  row has to exist first anyway.
-
-### M2. `payer_name` and `member_id` are typed columns permanently holding literals
+### M1. `payer_name` and `member_id` are typed columns permanently holding literals
 
 - **What:** Every Claim row is written with `payerName` and `memberId` read off
   the populated claim, where both are constants: `"Sample Payer Insurance"` and
@@ -477,15 +572,43 @@ policy. Listed so the size of the gap is known.*
   the same; the failure arrives the moment one claim carries a real payer, at
   which point a column that has held one literal since the beginning starts
   mixing real and placeholder values with nothing to tell them apart. The
-  corrected and appeal paths already copy `original.payerName` and
-  `original.memberId` forward (`server.js:1060-1061`, `:1160-1161`), so a
-  placeholder propagates down a whole chain. This is also what makes the `||
-  "Unknown payer"` fallbacks unreachable dead ends rather than safety nets.
+  corrected and appeal paths copy `original.payerName` and `original.memberId`
+  forward (`server.js:1058-1059`, `:1166-1167`), so a placeholder propagates
+  down a whole chain. This is also what makes the `|| "Unknown payer"` fallbacks
+  unreachable dead ends rather than safety nets.
 - **Proposed change:** Short term, write these from the encounter's Coverage
-  once C5 exists, and until then write nothing rather than a literal — an empty
-  column says "not known", a plausible fake does not. Repository accepts both
-  today (`createClaim` requires them non-empty, so that check would relax). No
-  migration, though existing rows would keep the literal unless backfilled.
+  once C7 exists, and until then write nothing rather than a literal — an empty
+  column says "not known", a plausible fake does not. `createClaim` requires
+  them non-empty today, so that check would relax. No migration, though existing
+  rows would keep the literal unless backfilled.
+
+### M2. Two of the four model-calling stages have no truncation guard, and one of them is the stage whose output is stored and sent
+
+- **What:** PR #30 added a `stop_reason === "max_tokens"` check to `extract.js`
+  and `suggestCodes.js`. `draftAppeal.js` and `cleanupTranscript.js` still have
+  none.
+- **Where:** `extract.js:63-65` and `suggestCodes.js:67-69` (guarded) against
+  `draftAppeal.js:136` (`max_tokens: 8000`, no check before the return at
+  `:181-194`) and `cleanupTranscript.js:30`.
+- **Severity:** high
+- **Why it matters:** `draftAppeal` is the only unguarded stage whose output
+  both reaches the store and reaches a payer. A response cut off mid-structure
+  still carries a `tool_use` block, and every field is defaulted — so a truncated
+  draft returns a short `letterBody`, a partial `supportingQuotes` array and a
+  partial `suggestedCodeChanges` array, with no error anywhere. Two concrete
+  failures follow. The letter is written verbatim into a claim-stage artifact and
+  filed as an appeal (`server.js:1155-1158`), so the store's record of why a
+  denial was challenged is a fragment. And `buildCorrectedClaim` applies whatever
+  changes survived the cut, then throws only on changes that match nothing — a
+  silently *shorter* list passes every check, and the corrected claim goes to the
+  payer missing edits the reviewer never saw, because they were never rendered.
+  `needsReviewBeforeSending` is computed over the quotes that survived, so it
+  reports clean.
+- **Proposed change:** Apply the same `stop_reason` throw to `draftAppeal.js`;
+  `cleanupTranscript.js` can take it too, though its output is never persisted.
+  Pipeline only; no schema change, no migration. Worth pairing with C5, which is
+  what would let anyone find an artifact already written from a truncated
+  response.
 
 ### M3. Every claim carries provider identity that no row references
 
@@ -494,7 +617,7 @@ policy. Listed so the size of the gap is known.*
   which provider profile was used.
 - **Where:** `backend/src/providerProfiles.js:24-25` (`STORE_PATH`);
   `server.js:852` reads `providerId` from the request body and `:862` uses it
-  without storing it anywhere; `buildStediClaim.js:139-158`.
+  without storing it anywhere; `buildStediClaim.js:139-159`.
 - **Severity:** medium
 - **Why it matters:** The NPI is the claim's assertion of who provided care.
   After a redeploy the file is gone, so the profile that produced an already-
@@ -513,27 +636,54 @@ policy. Listed so the size of the gap is known.*
 - **What:** There is no `appeal` claim type and no `appeal` artifact stage, so
   appeals are written as `corrected` claims and the letter rides along as extra
   keys on a claim-stage artifact.
-- **Where:** `server.js:1149-1161`; vocabularies at `NotionRepository.js:23` and
-  `:25`. The code says so in its own comment at `server.js:1147-1148`.
+- **Where:** `server.js:1155-1168`; vocabularies at `NotionRepository.js:23` and
+  `:25`. The code says so in its own comment at `server.js:1099-1104`.
 - **Severity:** medium
 - **Why it matters:** "How many denials did we appeal, and how many were
   overturned" cannot be answered by a query, because the Claims database cannot
-  tell an appeal from a correction. And the claim-stage artifact now has two
-  possible shapes — `populateClaim`'s output, or that output plus
-  `appealLetter` and `appealOfClaimId` — so anything reading a claim artifact
-  has to handle both.
+  tell an appeal from a correction. The claim-stage artifact now has two
+  possible shapes — `populateClaim`'s output, or that output plus `appealLetter`
+  and `appealOfClaimId` — so anything reading a claim artifact has to handle
+  both, and S5's "which artifact was this claim built from" gets harder for the
+  same reason.
 - **Proposed change:** Add `appeal` to `CLAIM_TYPES` and an `appeal` stage to
   `STAGES`. Both are Notion select options, so the schema change is additive and
   existing rows are unaffected; History's bucket logic and `renderClaimActions`
   would need to recognise the new type, and existing appeal rows stay
   mislabelled as `corrected` unless backfilled.
 
-### M5. The denial loop's money and deadlines exist only inside a JSON blob
+### M5. The appeal draft's judgement is computed, shown once, and discarded
+
+- **What:** `draftAppeal` returns eight fields. Only `letterBody` ever reaches
+  the store, and only if the provider goes on to submit. `denialAssessment`,
+  `worthAppealing`, `recommendedAction`, `supportingQuotes`, `quoteGrounding`,
+  `suggestedCodeChanges` and `unsupportedQuoteCount` are returned to the browser
+  and dropped.
+- **Where:** `draftAppeal.js:181-194` against `server.js:609-616`, which
+  responds with `{ draft }` and persists nothing; the only stored fragment is
+  `appealLetter` at `:1158`.
+- **Severity:** medium
+- **Why it matters:** This is the one model call in the denial loop, and it is
+  the only stage in the whole app whose output is not written as an artifact.
+  Two things are lost. When the draft says `worthAppealing: false` — the
+  intended, correct outcome for a denial that cannot be argued with — the
+  practice's decision not to appeal leaves no record at all, so "why did we let
+  CL004 go?" has no answer and reopening it costs another paid call that may
+  answer differently. And `suggestedCodeChanges` is the input
+  `/api/claims/:claimId/resubmit` acts on: the correction that gets filed is
+  derived from a list nothing kept, so the stored corrected claim cannot be
+  traced back to the reasoning that produced it.
+- **Proposed change:** Persist the draft as an artifact on the `appeal` stage
+  proposed in M4, `createdBy: "system"`, at the moment it is generated rather
+  than at submission. Needs M4's select option; no other schema change and no
+  migration.
+
+### M6. The denial loop's money and deadlines exist only inside a JSON blob
 
 - **What:** Payer Feedback promotes exactly one number to a typed column;
   everything else `analyzeRemittance` computes lives inside `content`.
 - **Where:** `NotionRepository.js:611-625` writes `amount_at_risk` and nothing
-  else numeric; `analyzeRemittance.js:192-215` returns `money.billed`,
+  else numeric; `analyzeRemittance.js:188-214` returns `money.billed`,
   `money.paid`, `patientResponsibility`, `contractualWriteOff`, both deadlines
   and `daysRemaining` for each.
 - **Severity:** medium
@@ -548,7 +698,7 @@ policy. Listed so the size of the gap is known.*
   `content` as the full record. Additive properties; existing rows backfill from
   their own `content`, which is a one-off script rather than a real migration.
 
-### M6. Validation and grounding verdicts are unreachable by query
+### M7. Validation and grounding verdicts are unreachable by query
 
 - **What:** The two review signals the pipeline computes — whether a suggested
   code is recognised, and whether a medical-necessity quote is really in the
@@ -577,13 +727,33 @@ policy. Listed so the size of the gap is known.*
 
 ## 5. Revisit
 
-Nothing found this run. Every entry in `SCHEMA.md`'s Settled decisions still
-holds for a synthetic-data prototype, and the code has not drifted from any of
-them — `case_title` is still written and read as documented, the stage key is
-still `transcript` under a UI that says Context, foreign keys are still plain
-text, artifacts are still append-only, and `Document` is still a reserved slot.
-The one statement that has gone stale is in the status table rather than in
-Settled decisions, and is reported at S6.
+One settled decision has been overtaken by a change made since it was settled.
+
+**Sequential, human-readable IDs.** `SCHEMA.md` settles this on the grounds that
+`P001` is enumerable and unsafe for production, and that a demo where you can
+read the IDs aloud is worth more than one where you cannot. That reasoning held
+while the IDs were internal. It no longer is: since PR #27 and PR #29, the Claim
+row's `claim_id` is sent to the payer as CLP01 on every submission path —
+original, corrected and appeal — and `ingestRemittance` now matches an incoming
+835 back to a claim on exactly that value (`buildStediClaim.js:162`,
+`ingestRemittance.js:80`). The ID stopped being a display convenience and became
+a reconciliation key on an external wire protocol.
+
+What changed, concretely: `CL004` is unique within one Notion workspace and
+nowhere else. A local development server and the deployed Render service both
+mint `CL004` and both submit it to Stedi's Test Payer, so a remittance fetched
+by one can legitimately match a claim belonging to the other. The matching logic
+has no way to detect that — it compares two identical strings and files the
+verdict. This is S2's collision problem with a second party now holding the key.
+
+The decision itself may well still be right for the demo. What has expired is the
+assumption behind it, so the recommendation is narrow rather than a rewrite:
+keep the readable ID as the display name, and send a namespaced control number —
+`<deployment>-CL004`, or the ID plus a per-workspace prefix — so the value
+crossing the wire is unique even where the readable one is not. That is a change
+to `buildStediClaim` and to the match in `ingestRemittance`, with no schema
+change; claims already submitted under a bare ID keep matching on the fallback
+path that is already there for them.
 
 ---
 

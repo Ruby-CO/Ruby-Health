@@ -124,3 +124,15 @@ jobs:
         run: |
           npm ci
           node scripts/publish-data-model.js
+
+      # Separate step so a failure here is legible: the page and the run log
+      # are different targets, and filing the run is the half that was being
+      # forgotten when it depended on someone remembering.
+      - name: File the run in the Notion audit log
+        if: inputs.publish_to_notion
+        working-directory: backend
+        env:
+          NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
+          # Not a secret, same as the page id above.
+          NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_MODEL_AUDITS_DATA_SOURCE_ID || 'e2807038-74c2-45dc-9458-a52a854cd4e0' }}
+        run: node scripts/record-audit-run.js
