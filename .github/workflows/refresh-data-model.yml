@@ -50,6 +50,7 @@ jobs:
       # Pointing Claude at it rather than restating the instructions here means
       # there is one copy to keep correct, not two that drift.
       - name: Run the data-model audit
+        id: audit
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -114,7 +115,10 @@ jobs:
           fi
 
       - name: Update the Notion Data Model page
-        if: inputs.publish_to_notion
+        # The Notion updates don't depend on the PR -- a failure opening the PR
+        # (e.g. the repo's "Actions may create PRs" setting is off) must not
+        # skip filing the audit. Gate on the audit having produced the docs.
+        if: ${{ steps.audit.outcome == 'success' && inputs.publish_to_notion }}
         working-directory: backend
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
@@ -129,7 +133,7 @@ jobs:
       # are different targets, and filing the run is the half that was being
       # forgotten when it depended on someone remembering.
       - name: File the run in the Notion audit log
-        if: inputs.publish_to_notion
+        if: ${{ steps.audit.outcome == 'success' && inputs.publish_to_notion }}
         working-directory: backend
         env:
           NOTION_API_KEY: ${{ secrets.NOTION_API_KEY }}
