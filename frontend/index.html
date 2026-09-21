@@ -4023,9 +4023,6 @@
           const v = input.value.trim();
           if (v) {
             arr.push(v);
-            if (Array.isArray(ws.facts?.medicalNecessityGrounding)) {
-              ws.facts.medicalNecessityGrounding.push(null);
-            }
             input.value = "";
             ws.rerender("facts");
             ws.touched("facts");
@@ -4124,6 +4121,13 @@
           const v = input.value.trim();
           if (v) {
             arr.push(v);
+            // The grounding array runs parallel to the quotes, so a new quote
+            // needs its own slot or every badge after it shifts onto the
+            // wrong quote. Chips (symptoms, diagnoses) have no grounding and
+            // must not touch this array.
+            if (Array.isArray(ws.facts?.medicalNecessityGrounding)) {
+              ws.facts.medicalNecessityGrounding.push(null);
+            }
             input.value = "";
             ws.rerender("facts");
             ws.touched("facts");

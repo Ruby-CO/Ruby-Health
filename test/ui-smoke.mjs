@@ -93,6 +93,27 @@ ok(flags[0][0].includes("verified") && flags[0][1].includes("In context"), "verb
 ok(flags[1][0].includes("paraphrased") && flags[1][1].includes("Paraphrased"), "reworded quote is labelled a paraphrase, not a quote");
 ok(flags[2][0].includes("unsupported") && flags[2][1].includes("Not found"), "unsupported quote is called out");
 
+console.log("\n[ grounding array stays parallel to the quotes ]");
+// Verdicts live in an array parallel to the quotes. Adding a quote used to
+// leave that array one short, and adding a symptom chip used to push a slot
+// onto it -- the two mistakes happened to cancel on screen, but the stored
+// facts carried phantom entries. Check the data, not just the badges.
+const parallel = () => page.evaluate(() => {
+  const f = JSON.parse(sessionStorage.getItem("rubyHealthDemoState")).facts;
+  return [f.medicalNecessityLanguage.length, f.medicalNecessityGrounding.length];
+});
+await page.fill(".quote-add-row > .chip-input", "Patient denies fever.");
+await page.press(".quote-add-row > .chip-input", "Enter");
+let [quotes, slots] = await parallel();
+ok(quotes === 4 && slots === 4, `a new quote gets its own grounding slot (${quotes} quotes, ${slots} slots)`);
+await page.fill(".chip-list > .chip-input >> nth=0", "headache");
+await page.press(".chip-list > .chip-input >> nth=0", "Enter");
+[quotes, slots] = await parallel();
+ok(quotes === 4 && slots === 4, `a symptom chip does not touch the grounding array (${quotes} quotes, ${slots} slots)`);
+const afterEdits = await page.$$eval(".quote-flag", els => els.map(e => e.className));
+ok(afterEdits.length === 4 && afterEdits[0].includes("verified") && afterEdits[3].includes("unchecked"),
+  "earlier badges untouched; the new quote reads as not yet checked");
+
 console.log("\n[ stale badge cannot persist through an edit ]");
 await page.fill(".quote-card textarea >> nth=0", "Totally different text now");
 const after = await page.$eval(".quote-flag", e => [e.className, e.textContent.trim()]);
