@@ -130,7 +130,7 @@ test("defaults to claim frequency code 1 (original) with no original reference n
   const claim = populateClaim(facts, codes);
   const stediClaim = buildStediClaim(claim);
   assert.equal(stediClaim.claimInformation.claimFrequencyCode, "1");
-  assert.equal("originalReferenceNumber" in stediClaim.claimInformation, false);
+  assert.equal("claimSupplementalInformation" in stediClaim.claimInformation, false);
 });
 
 test("a corrected resubmission carries frequency code 7 and the payer's control number", () => {
@@ -140,7 +140,12 @@ test("a corrected resubmission carries frequency code 7 and the payer's control 
     originalReferenceNumber: "2026250012345",
   });
   assert.equal(stediClaim.claimInformation.claimFrequencyCode, "7");
-  assert.equal(stediClaim.claimInformation.originalReferenceNumber, "2026250012345");
+  // The PCCN rides in claimSupplementalInformation.claimControlNumber -- the
+  // field Stedi actually accepts; a top-level originalReferenceNumber is a 400.
+  assert.equal(
+    stediClaim.claimInformation.claimSupplementalInformation.claimControlNumber,
+    "2026250012345",
+  );
 });
 
 test("rejects a claim with no diagnoses", () => {

@@ -165,13 +165,14 @@ export function buildStediClaim(claim, config = {}) {
       // 1 = original claim, 7 = replacement/corrected claim (X12 CLM05-3).
       claimFrequencyCode: config.claimFrequencyCode || "1",
       // Required alongside frequency code 7 -- without it the payer reads a
-      // correction as a brand-new claim and denies it as a duplicate. Named
-      // originalReferenceNumber to match the X12 REF*F8 segment (Original
-      // Reference Number) under Stedi's own camelCase convention for this
-      // schema -- not yet confirmed against a live corrected submission in
-      // the sandbox, the same caveat parseRemittance.js carried until its
-      // real-document check. Flag this comment for removal once that's done.
-      ...(config.originalReferenceNumber ? { originalReferenceNumber: config.originalReferenceNumber } : {}),
+      // correction as a brand-new claim and denies it as a duplicate. Stedi
+      // carries the original Payer Claim Control Number (X12 REF*F8) as
+      // claimSupplementalInformation.claimControlNumber, not a top-level
+      // field; sending it flat returns HTTP 400 "unknown field". Verified
+      // against Stedi's OpenAPI schema and a live sandbox resubmission.
+      ...(config.originalReferenceNumber
+        ? { claimSupplementalInformation: { claimControlNumber: config.originalReferenceNumber } }
+        : {}),
       planParticipationCode: "A", // assigned
       benefitsAssignmentCertificationIndicator: "Y",
       releaseInformationCode: "Y",
