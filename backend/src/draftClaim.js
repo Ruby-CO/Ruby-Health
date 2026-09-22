@@ -13,3 +13,14 @@ export function pickOriginalDraft(claims) {
   if (!Array.isArray(claims)) return null;
   return [...claims].reverse().find((c) => c.status === "draft" && c.claimType === "original") || null;
 }
+
+// True when the encounter already carries an original claim that has left draft
+// -- i.e. it has been billed. Once that is so, populating the claim again must
+// not file a *second* original on the same visit: that would put two claims for
+// one encounter in front of the payer. (This is the mirror of pickOriginalDraft:
+// that one stops a corrected draft being adopted; this one stops a second
+// original being minted after the first was submitted.)
+export function hasBilledOriginal(claims) {
+  if (!Array.isArray(claims)) return false;
+  return claims.some((c) => c && c.claimType === "original" && c.status !== "draft");
+}

@@ -14,7 +14,7 @@ import { submitToStedi, StediSubmissionError } from "./pipeline/submitToStedi.js
 import { annotateValidation, unrecognisedCodes } from "./pipeline/validateCodes.js";
 import { usageTotals } from "./usage.js";
 import { persistenceFailure } from "./persistence.js";
-import { pickOriginalDraft } from "./draftClaim.js";
+import { pickOriginalDraft, hasBilledOriginal } from "./draftClaim.js";
 import { loadCodeSet } from "../../reference/loadCodes.mjs";
 import { createNotionRepositoryFromEnv, createBlobStoreFromEnv, NotionRepositoryError } from "./repository/index.js";
 import { RemittanceParseError } from "./pipeline/parseRemittance.js";
@@ -767,7 +767,7 @@ app.delete("/api/claims/:claimId", async (req, res) => {
 });
 
 app.post("/api/extract", async (req, res) => {
-  const { transcript, encounterId } = req.body || {};
+  const { transcript, encounterId, skipPersistence } = req.body || {};
 
   if (typeof transcript !== "string" || transcript.trim().length === 0) {
     return res.status(400).json({ error: "Request body must include a non-empty 'transcript' string." });
@@ -793,6 +793,14 @@ app.post("/api/extract", async (req, res) => {
     const unrecognised = unrecognisedCodes(suggestions);
     if (unrecognised.length > 0) {
       console.log(JSON.stringify({ type: "validation", unrecognised }));
+    }
+
+    // The eval harness passes skipPersistence: it measures the pipeline and must
+    // not write into the product store. Without it, an eval call with no
+    // encounterId hits the auto-provision path and files real-looking encounters
+    // and artifacts under the shared "Unidentified Patient" (audit C2).
+    if (skipPersistence) {
+      return res.json({ facts, suggestions, encounterId: null, autoProvisioned: null, persistence: null });
     }
 
     let effectiveEncounterId = encounterId;
@@ -860,9 +868,19 @@ async function persistClaimDraft(encounterId, claim, providerId) {
     // live-looking draft siblings on an encounter that had already been billed.
     // Repointing the existing draft keeps it aimed at the artifact it was
     // actually built from.
-    const draft = await findDraftClaim(encounterId);
+    const existing = await repository.listClaimsForEncounter(encounterId);
+    const draft = pickOriginalDraft(existing);
     if (draft) {
       await repository.updateClaimArtifact(draft.claimId, artifact.artifactId);
+      return;
+    }
+
+    // No reusable original draft. If the encounter already has an original claim
+    // that has left draft, the visit has been billed -- do not file a second
+    // one (audit S1). The claim is still returned to the caller and its artifact
+    // is still versioned; it just does not create a duplicate Claim row.
+    if (hasBilledOriginal(existing)) {
+      console.log(JSON.stringify({ type: "persist-skip", reason: "encounter already billed", encounterId }));
       return;
     }
 

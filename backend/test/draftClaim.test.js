@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { pickOriginalDraft } from "../src/draftClaim.js";
+import { pickOriginalDraft, hasBilledOriginal } from "../src/draftClaim.js";
 
 test("returns the encounter's original draft", () => {
   const draft = pickOriginalDraft([
@@ -43,4 +43,21 @@ test("no draft, empty, and non-array all yield null", () => {
   assert.equal(pickOriginalDraft([{ claimId: "CL001", claimType: "original", status: "submitted" }]), null);
   assert.equal(pickOriginalDraft([]), null);
   assert.equal(pickOriginalDraft(undefined), null);
+});
+
+test("hasBilledOriginal: a submitted original means the visit is billed", () => {
+  assert.equal(hasBilledOriginal([{ claimId: "CL001", claimType: "original", status: "submitted" }]), true);
+  assert.equal(hasBilledOriginal([{ claimId: "CL001", claimType: "original", status: "denied" }]), true);
+});
+
+test("hasBilledOriginal: an original still in draft is not billed", () => {
+  assert.equal(hasBilledOriginal([{ claimId: "CL001", claimType: "original", status: "draft" }]), false);
+});
+
+test("hasBilledOriginal: a corrected/appeal claim does not count as a billed original", () => {
+  // A stuck corrected draft must not make the encounter look billed, or the
+  // first real original could never be filed.
+  assert.equal(hasBilledOriginal([{ claimId: "CL002", claimType: "corrected", status: "submitted" }]), false);
+  assert.equal(hasBilledOriginal([]), false);
+  assert.equal(hasBilledOriginal(undefined), false);
 });

@@ -67,7 +67,9 @@ async function post(endpoint, body) {
  */
 async function runPipeline(fixture) {
   // P2: one merged call returns both facts and suggestions.
-  const { facts, suggestions } = await post("/api/extract", { transcript: fixture.transcript });
+  // skipPersistence: the eval measures the pipeline, it must not write into the
+  // product store (audit C2).
+  const { facts, suggestions } = await post("/api/extract", { transcript: fixture.transcript, skipPersistence: true });
   return { facts, suggestions };
 }
 
