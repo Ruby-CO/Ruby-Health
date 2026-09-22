@@ -29,12 +29,13 @@ const ANALYSIS = {
 
 // Stands in for the SDK client. Returns whatever tool input a test wants, and
 // records the request so the prompt itself can be asserted on.
-function fakeAnthropic(toolInput, { capture } = {}) {
+function fakeAnthropic(toolInput, { capture, stopReason } = {}) {
   return {
     messages: {
       async create(request) {
         if (capture) capture.request = request;
         return {
+          stop_reason: stopReason,
           content: [{ type: "tool_use", name: "record_appeal_draft", input: toolInput }],
           usage: { input_tokens: 1200, output_tokens: 400 },
         };
@@ -42,6 +43,14 @@ function fakeAnthropic(toolInput, { capture } = {}) {
     },
   };
 }
+
+test("an appeal draft cut off at max_tokens throws instead of returning a truncated letter", async () => {
+  const anthropic = fakeAnthropic({}, { stopReason: "max_tokens" });
+  await assert.rejects(
+    () => draftAppeal(anthropic, "claude-sonnet-5", { analysis: ANALYSIS, transcript: TRANSCRIPT }),
+    /cut off at max_tokens/,
+  );
+});
 
 const GOOD_DRAFT = {
   denialAssessment: "The payer read this as elective. The record shows failed conservative treatment.",

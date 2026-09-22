@@ -162,6 +162,16 @@ ${transcript || "(no transcript on file for this encounter)"}`,
 
   recordUsage("appeal", model, response);
 
+  // A response cut off at max_tokens arrives as a tool_use block whose input is
+  // whatever JSON survived the cut. Here that means a short letter and a
+  // silently shortened suggestedCodeChanges list -- both stored on the claim
+  // artifact and, once submitted, sent to a payer. The other model stages guard
+  // this; the appeal stage is the one that most has to, so throw rather than
+  // hand back a truncated draft that looks complete.
+  if (response.stop_reason === "max_tokens") {
+    throw new Error("Claude's appeal draft was cut off at max_tokens; raise the cap or shorten the input.");
+  }
+
   const toolUse = response.content.find((block) => block.type === "tool_use");
   if (!toolUse) {
     throw new Error("Claude did not return a structured appeal draft.");
