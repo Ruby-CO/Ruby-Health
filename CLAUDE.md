@@ -96,17 +96,27 @@ works, nothing more.
 
 ## How the pipeline works
 
-Five stages. The split between "asks Claude" and "plain arithmetic" is the main
-design line in this project — keep it sharp.
+The split between "asks Claude" and "plain arithmetic" is the main design line
+in this project — keep it sharp.
 
 | Stage | File | Calls a model? |
 |---|---|---|
-| Clean up transcript | `cleanupTranscript.js` | Yes — cheap model. Leaves the claim path in P2. |
-| Extract clinical facts | `extract.js` | Yes |
-| Suggest codes | `suggestCodes.js` | Yes |
-| Check quotes are real | `verifyQuotes.js` | **No** — string matching |
+| Extract facts + suggest codes | `extractAndCode.js` | Yes — **one** call. Reads the transcript and returns both the facts and the codes (P2). The coder sees the actual words, not a summary. Facts and codes both derive from the transcript, so hand-editing facts does not re-shape codes. |
+| Check quotes are real | `verifyQuotes.js` | **No** — string matching, against the real transcript |
 | Validate codes | `validateCodes.js` | **No** — list lookup |
 | Build the claim | `populateClaim.js` | **No** — deterministic |
+
+`cleanupTranscript.js` (`generateBrief`) is a **separate** cheap-model call, not
+in the claim path: it produces the **brief** (a short summary shown above the
+transcript). It never rewrites or replaces the transcript — providers keep both.
+Before P2 it rewrote the transcript and the pipeline ran on that paraphrase; that
+is the correctness bug P2 fixed.
+
+`extractAndCode` sends a **cached E/M guidance prefix** (`cache_control` 1h TTL)
+so the fixed coding rules are paid for once an hour, not per claim, and
+**memoizes** an unchanged transcript in-process so re-entering a step does not
+re-call the model. Verify caching with `usage.cache_read_input_tokens` — zero
+across repeated calls means a silent invalidator.
 
 **Adding a stage that calls Claude?** Follow the existing shape: one async
 function taking `(anthropic, model, …)`, a `SYSTEM_PROMPT`, a single forced tool
@@ -499,16 +509,22 @@ half-finished change to master to save it; park it on a branch instead.
 
 ## Where things stand
 
-P0 (correctness fixes) and P1 (the eval suite) are done. **P2 is next**: merge
-the extraction and coding calls into one, drop the transcript rewrite from the
-claim path, and add a cached block of E/M coding guidance.
+P0 (correctness fixes), P1 (the eval suite), and **P2 (pipeline rebuild) are
+done.** P2 merged extraction and coding into one call (`extractAndCode.js`),
+retired the transcript rewrite from the claim path (cleanup is now the
+brief-only `generateBrief`), added the cached E/M guidance prefix, and added
+per-transcript memoization. Measured against a same-model (Sonnet 5) baseline on
+22 Sep 2026: recall held within the documented noise band, quote grounding rose
+82.5 → 100 and necessity recall 54 → ~65, cost per claim dropped, and cache reads
+are non-zero. Scorecards and the read are in `eval/results/README.md`.
 
 Full plan: `docs/mvp-v1-build-plan.html`. Running log: the "Ruby Health MVP Demo
 — Build Log & Next Steps" page in Notion.
 
-**Two things to know before you start:**
+**Two things to know:**
 
-- **There is no baseline eval score yet.** Nobody has run the suite against a
-  live server. Until that happens there is nothing to measure P2 against.
+- **The eval can be run locally** now that a key is in `backend/.env`:
+  `cd backend && npm start &` then `node eval/run.mjs` (~$0.60, Sonnet). One
+  watch item from P2: procedure recall sat at the low end of its band (81.8).
 - **`reference/codes/` is gitignored**, so a fresh clone has no code list. The
   server handles this — validation reports `unchecked` instead of failing.

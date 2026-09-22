@@ -1,3 +1,11 @@
+> **STATUS: DONE (22 Sep 2026).** All four changes shipped — merged extract+code
+> (`extractAndCode.js`), the transcript rewrite retired from the claim path
+> (cleanup is now the brief-only `generateBrief`), the cached E/M guidance
+> prefix, and per-transcript memoization. Measured against a same-model
+> (Sonnet 5) baseline: recall held within noise, quote grounding 82.5 → 100,
+> necessity recall 54 → ~65, cost down, cache reads non-zero. Kept as the record
+> of what P2 was. See `eval/results/README.md` for the scorecards.
+
 # P2 handoff — pipeline rebuild
 
 Verified against `master` at `01da664`, 13 Sep 2026; models, caps and baseline

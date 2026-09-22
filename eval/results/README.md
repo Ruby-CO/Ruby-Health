@@ -30,3 +30,21 @@ between runs. 007 and 016 are stable failures worth looking at; the rest are the
 model's coin-flip on whether to emit an E/M line at all.
 
 Reminder from `../README.md`: the answer key was written by an AI, not a certified coder. These are regression numbers, not accuracy claims.
+
+## P2 (merged extract+code, cached E/M prefix) — 22 Sep 2026, Sonnet 5
+
+| File | What it is |
+|---|---|
+| `2026-09-22T01-12-29-912Z.json` | **Pre-P2 baseline, Sonnet 5.** Current pipeline on the current model, run clean before P2 so the comparison is same-model. This resolves the earlier ambiguity about which model the 13 Sep baselines used. |
+| `2026-09-22T01-25-40-803Z.json` | **P2 run 1.** Merged extract+code, cached E/M guidance prefix. |
+| `2026-09-22T02-06-40-744Z.json` | **P2 run 2** (confirmation). |
+
+Read against the two-run noise band this folder already documents (~10 pts on a
+recall metric; procedure recall alone swings 81.8↔90.9 between identical runs):
+P2 holds recall within noise (dx 92.3/96.2, E/M exact 60/75) and delivers a
+stable, above-noise gain on **quote grounding (82.5 → 100 both runs)** and
+necessity phrase recall (54.3 → ~65) — the correctness target, since coding and
+the quote check now run on the real transcript, not a paraphrase. Cost per claim
+dropped (one model call instead of two; the E/M prefix is cached — a real run
+showed cache-read tokens reused across encounters). One watch item: procedure
+recall sat at 81.8 both P2 runs, the low end of its band.

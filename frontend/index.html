@@ -790,7 +790,7 @@
             </div>
             <div style="display:flex; gap:8px;">
               <button id="uploadContextBtn" class="btn" type="button">Upload a file</button>
-              <button id="cleanupBtn" class="btn" type="button">Clean up wording</button>
+              <button id="cleanupBtn" class="btn" type="button">Generate brief</button>
             </div>
             <input id="uploadContextInput" type="file" accept=".txt,.md,.markdown,.csv,text/*" hidden />
           </div>
@@ -3430,7 +3430,7 @@
 
     const STAGE_INPUT = {
       facts: () => fingerprint(state.transcript.trim()),
-      codes: () => fingerprint(state.facts),
+      codes: () => fingerprint(state.transcript.trim()),
       claim: () => fingerprint({ facts: state.facts, codes: state.codes }),
     };
 
@@ -3688,7 +3688,7 @@
       }
 
       cleanupBtn.disabled = true;
-      cleanupStatusEl.textContent = "Cleaning up...";
+      cleanupStatusEl.textContent = "Writing the brief...";
       cleanupStatusEl.className = "status";
 
       try {
@@ -3700,20 +3700,21 @@
         const data = await res.json();
 
         if (!res.ok) {
-          cleanupStatusEl.textContent = data.error || "Cleanup failed.";
+          cleanupStatusEl.textContent = data.error || "Brief generation failed.";
           cleanupStatusEl.className = "status error";
           return;
         }
 
-        state.transcript = data.cleanedTranscript;
+        // The brief is a reading aid shown above the transcript. It never
+        // replaces the transcript -- the pipeline and the quote check always
+        // run on what was actually said.
         state.transcriptSummary = data.summary;
-        transcriptEl.value = state.transcript;
         renderTranscriptSummary();
-        cleanupStatusEl.textContent = "Done — punctuation fixed and summary added above.";
+        cleanupStatusEl.textContent = "Done — brief added above. The transcript is unchanged.";
         cleanupStatusEl.className = "status";
         renderNav();
       } catch (err) {
-        console.error("Cleanup error:", err);
+        console.error("Brief error:", err);
         cleanupStatusEl.textContent = "Something went wrong: " + err.message;
         cleanupStatusEl.className = "status error";
       } finally {
@@ -3721,16 +3722,21 @@
       }
     });
 
-    async function runExtract() {
+    // P2: one call to /api/extract returns both the facts and the code
+    // suggestions -- the coder reads the transcript, not a summary. Facts and
+    // codes are derived from the transcript together, so the Facts step and the
+    // Codes step share this one call; the server memoizes an unchanged
+    // transcript, so walking through both does not pay twice.
+    async function deriveFactsAndCodes(statusEl, doneText) {
       const transcript = state.transcript.trim();
       if (!transcript) {
-        extractStatusEl.textContent = "Add some context first -- record, paste or type it.";
-        extractStatusEl.className = "status error";
+        statusEl.textContent = "Add some context first -- record, paste or type it.";
+        statusEl.className = "status error";
         return false;
       }
 
-      extractStatusEl.textContent = "Extracting...";
-      extractStatusEl.className = "status";
+      statusEl.textContent = "Working...";
+      statusEl.className = "status";
 
       try {
         const res = await fetch("/api/extract", {
@@ -3741,14 +3747,18 @@
         const data = await res.json();
 
         if (!res.ok) {
-          extractStatusEl.textContent = data.error || "Extraction failed.";
-          extractStatusEl.className = "status error";
+          statusEl.textContent = data.error || "Extraction failed.";
+          statusEl.className = "status error";
           return false;
         }
 
         state.facts = data.facts;
         markDerived("facts");
         renderFacts(factsCardEl, claimWorkspace);
+
+        state.codes = Array.isArray(data.suggestions) ? data.suggestions : [];
+        markDerived("codes");
+        renderCodes(codesContainer, claimWorkspace);
 
         // No patient/case picked yet -- the server auto-filed this encounter
         // under a shared "unidentified patient" case titled from the chief
@@ -3765,15 +3775,19 @@
           updatePatientCaseBar();
         }
 
-        reportPersistence(extractStatusEl, data, "Done — see the Facts tab.");
+        reportPersistence(statusEl, data, doneText);
         renderNav();
         return true;
       } catch (err) {
         console.error("Extract error:", err);
-        extractStatusEl.textContent = "Something went wrong: " + err.message;
-        extractStatusEl.className = "status error";
+        statusEl.textContent = "Something went wrong: " + err.message;
+        statusEl.className = "status error";
         return false;
       }
+    }
+
+    function runExtract() {
+      return deriveFactsAndCodes(extractStatusEl, "Done — facts and codes are ready.");
     }
 
     // ---- Mic capture: tap to talk, tap again fast to lock hands-free ----
@@ -4341,49 +4355,11 @@
       container.appendChild(addBtn);
     }
 
-    async function runSuggestCodes() {
-      if (!hasFacts()) {
-        codesStatusEl.textContent = "Add some clinical facts first (on the Facts tab), or extract them from the context.";
-        codesStatusEl.className = "status error";
-        return false;
-      }
-
-      suggestCodesBtn.disabled = true;
-      codesStatusEl.textContent = "Suggesting codes...";
-      codesStatusEl.className = "status";
-
-      try {
-        const res = await fetch("/api/suggest-codes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ facts: state.facts, encounterId: state.encounterId }),
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          codesStatusEl.textContent = data.error || "Code suggestion failed.";
-          codesStatusEl.className = "status error";
-          return false;
-        }
-
-        state.codes = Array.isArray(data.suggestions) ? data.suggestions : [];
-        markDerived("codes");
-        renderCodes(codesContainer, claimWorkspace);
-        reportPersistence(
-          codesStatusEl,
-          data,
-          state.codes.length ? "Done." : "No confident code suggestions — add some by hand below if you like."
-        );
-        renderNav();
-        return true;
-      } catch (err) {
-        console.error("Suggest codes error:", err);
-        codesStatusEl.textContent = "Something went wrong: " + err.message;
-        codesStatusEl.className = "status error";
-        return false;
-      } finally {
-        suggestCodesBtn.disabled = false;
-      }
+    // Codes now come from the transcript in the same call that produces the
+    // facts, so entering the Codes step (or clicking the button) runs the same
+    // merged derivation; a fresh transcript is a memo hit on the server.
+    function runSuggestCodes() {
+      return deriveFactsAndCodes(codesStatusEl, "Done.");
     }
 
     suggestCodesBtn.addEventListener("click", () => runSuggestCodes());
@@ -4519,18 +4495,10 @@
       // which made it look as though nothing had been filled in -- the nav
       // dots and the status line say what happened instead, and the steps are
       // there to be read in order.
+      // One merged call fills both the facts and the codes.
       const extracted = await runExtract();
       if (!extracted) {
         prepareClaimStatusEl.textContent = extractStatusEl.textContent || "Extraction failed at the Facts step.";
-        prepareClaimStatusEl.className = "status error";
-        prepareClaimBtn.disabled = false;
-        return;
-      }
-
-      prepareClaimStatusEl.textContent = "Suggesting codes...";
-      const coded = await runSuggestCodes();
-      if (!coded) {
-        prepareClaimStatusEl.textContent = codesStatusEl.textContent || "Code suggestion failed at the Codes step.";
         prepareClaimStatusEl.className = "status error";
         prepareClaimBtn.disabled = false;
         return;

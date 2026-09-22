@@ -4,9 +4,8 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import Anthropic from "@anthropic-ai/sdk";
-import { extractClinicalFacts } from "./pipeline/extract.js";
-import { cleanupTranscript } from "./pipeline/cleanupTranscript.js";
-import { suggestCodes } from "./pipeline/suggestCodes.js";
+import { extractAndCode } from "./pipeline/extractAndCode.js";
+import { generateBrief } from "./pipeline/cleanupTranscript.js";
 import { populateClaim, ClaimError } from "./pipeline/populateClaim.js";
 import { verifyNecessityQuotes } from "./pipeline/verifyQuotes.js";
 import { buildStediClaim, StediMappingError } from "./pipeline/buildStediClaim.js";
@@ -781,11 +780,20 @@ app.post("/api/extract", async (req, res) => {
   }
 
   try {
-    const facts = await extractClinicalFacts(anthropic, MODEL, transcript);
+    // One model call reads the transcript and returns both the facts and the
+    // code suggestions (P2). The coder sees the actual words, not a summary.
+    const { facts, suggestions: rawSuggestions } = await extractAndCode(anthropic, MODEL, transcript);
 
     // Presented as direct quotation and carried into the claim as the
-    // justification for care, so it is checked before a reviewer sees it.
+    // justification for care, so it is checked against the real transcript
+    // before a reviewer sees it -- not against any rewritten version.
     facts.medicalNecessityGrounding = verifyNecessityQuotes(facts, transcript);
+
+    const suggestions = annotateValidation(rawSuggestions, codeIndex);
+    const unrecognised = unrecognisedCodes(suggestions);
+    if (unrecognised.length > 0) {
+      console.log(JSON.stringify({ type: "validation", unrecognised }));
+    }
 
     let effectiveEncounterId = encounterId;
     let autoProvisioned = null;
@@ -797,10 +805,11 @@ app.post("/api/extract", async (req, res) => {
     const providerId = resolveProviderId(req);
     const persistence = persistenceFailure(
       await persistArtifact(effectiveEncounterId, "transcript", { transcript }, providerId),
-      await persistArtifact(effectiveEncounterId, "facts", facts, providerId)
+      await persistArtifact(effectiveEncounterId, "facts", facts, providerId),
+      await persistArtifact(effectiveEncounterId, "codes", suggestions, providerId)
     );
 
-    res.json({ facts, encounterId: effectiveEncounterId || null, autoProvisioned, persistence });
+    res.json({ facts, suggestions, encounterId: effectiveEncounterId || null, autoProvisioned, persistence });
   } catch (err) {
     console.error("Extraction failed:", err);
     res.status(502).json({ error: "Extraction failed. See server logs for details." });
@@ -821,44 +830,13 @@ app.post("/api/cleanup-transcript", async (req, res) => {
   }
 
   try {
-    const { cleanedTranscript, summary } = await cleanupTranscript(anthropic, UTILITY_MODEL, transcript);
-    res.json({ cleanedTranscript, summary });
+    // The brief is a reading aid only -- it never replaces the transcript, so
+    // the pipeline and the quote check always run on what was actually said.
+    const { summary } = await generateBrief(anthropic, UTILITY_MODEL, transcript);
+    res.json({ summary });
   } catch (err) {
-    console.error("Transcript cleanup failed:", err);
-    res.status(502).json({ error: "Transcript cleanup failed. See server logs for details." });
-  }
-});
-
-app.post("/api/suggest-codes", async (req, res) => {
-  const { facts, encounterId } = req.body || {};
-
-  if (!facts || typeof facts !== "object") {
-    return res.status(400).json({ error: "Request body must include a 'facts' object (the extraction output)." });
-  }
-
-  if (!anthropic) {
-    return res.status(500).json({
-      error: "ANTHROPIC_API_KEY is not configured on the server. Add it to backend/.env and restart.",
-    });
-  }
-
-  try {
-    const suggested = await suggestCodes(anthropic, MODEL, facts);
-    const suggestions = annotateValidation(suggested, codeIndex);
-
-    const unrecognised = unrecognisedCodes(suggestions);
-    if (unrecognised.length > 0) {
-      console.log(JSON.stringify({ type: "validation", unrecognised }));
-    }
-
-    const persistence = persistenceFailure(
-      await persistArtifact(encounterId, "codes", suggestions, resolveProviderId(req))
-    );
-
-    res.json({ suggestions, persistence });
-  } catch (err) {
-    console.error("Code suggestion failed:", err);
-    res.status(502).json({ error: "Code suggestion failed. See server logs for details." });
+    console.error("Brief generation failed:", err);
+    res.status(502).json({ error: "Brief generation failed. See server logs for details." });
   }
 });
 

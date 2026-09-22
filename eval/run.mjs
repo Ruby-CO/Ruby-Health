@@ -66,8 +66,8 @@ async function post(endpoint, body) {
  * punctuated, and cleanup is leaving the claim path in P2.
  */
 async function runPipeline(fixture) {
-  const { facts } = await post("/api/extract", { transcript: fixture.transcript });
-  const { suggestions } = await post("/api/suggest-codes", { facts });
+  // P2: one merged call returns both facts and suggestions.
+  const { facts, suggestions } = await post("/api/extract", { transcript: fixture.transcript });
   return { facts, suggestions };
 }
 

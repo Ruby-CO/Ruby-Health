@@ -31,32 +31,32 @@ const fails = [];
 const ok = (c, m) => { console.log((c ? "  ok   " : "  FAIL ") + m); if (!c) fails.push(m); };
 
 // Stub the two model-backed endpoints so this exercises the UI, not the API.
+// P2: /api/extract returns both facts and suggestions in one response.
 await page.route("**/api/extract", (r) => r.fulfill({
   status: 200, contentType: "application/json",
-  body: JSON.stringify({ facts: {
-    chiefComplaint: "Sore throat",
-    symptoms: ["sore throat", "fever"],
-    diagnosesDiscussed: ["acute pharyngitis"],
-    proceduresPerformed: ["rapid strep test"],
-    medicalNecessityLanguage: [
-      "No cough.",
-      "Sore throat began three days ago, per the patient.",
-      "Patient was admitted overnight for observation.",
+  body: JSON.stringify({
+    facts: {
+      chiefComplaint: "Sore throat",
+      symptoms: ["sore throat", "fever"],
+      diagnosesDiscussed: ["acute pharyngitis"],
+      proceduresPerformed: ["rapid strep test"],
+      medicalNecessityLanguage: [
+        "No cough.",
+        "Sore throat began three days ago, per the patient.",
+        "Patient was admitted overnight for observation.",
+      ],
+      medicalNecessityGrounding: [
+        { quote: "No cough.", status: "verified", recall: 1 },
+        { quote: "Sore throat began three days ago, per the patient.", status: "paraphrased", recall: 0.9 },
+        { quote: "Patient was admitted overnight for observation.", status: "unsupported", recall: 0.2 },
+      ],
+    },
+    suggestions: [
+      { code: "J02.9", codeType: "ICD-10", description: "Acute pharyngitis", confidence: "high", rationale: "r", supportingDiagnoses: [] },
+      { code: "87880", codeType: "CPT", description: "Strep test", confidence: "high", rationale: "r", supportingDiagnoses: ["J02.9"] },
+      { code: "90471", codeType: "CPT", description: "Immunization admin", confidence: "medium", rationale: "r", supportingDiagnoses: [] },
     ],
-    medicalNecessityGrounding: [
-      { quote: "No cough.", status: "verified", recall: 1 },
-      { quote: "Sore throat began three days ago, per the patient.", status: "paraphrased", recall: 0.9 },
-      { quote: "Patient was admitted overnight for observation.", status: "unsupported", recall: 0.2 },
-    ],
-  }}),
-}));
-await page.route("**/api/suggest-codes", (r) => r.fulfill({
-  status: 200, contentType: "application/json",
-  body: JSON.stringify({ suggestions: [
-    { code: "J02.9", codeType: "ICD-10", description: "Acute pharyngitis", confidence: "high", rationale: "r", supportingDiagnoses: [] },
-    { code: "87880", codeType: "CPT", description: "Strep test", confidence: "high", rationale: "r", supportingDiagnoses: ["J02.9"] },
-    { code: "90471", codeType: "CPT", description: "Immunization admin", confidence: "medium", rationale: "r", supportingDiagnoses: [] },
-  ]}),
+  }),
 }));
 await page.route("**/api/populate-claim", (r) => r.fulfill({
   status: 200, contentType: "application/json",
