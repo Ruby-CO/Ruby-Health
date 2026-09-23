@@ -66,7 +66,7 @@ const markdown = `# Data Model
 
 > **Generated page — do not edit here.** Every run replaces this page in full.
 > Put notes in a child page, not in this one. The source of truth is
-> \`docs/data/\` in kayceecones/Ruby-Health.
+> \`docs/data/\` in Ruby-CO/Ruby-Health.
 
 **Generated from \`${sha}\` on ${branch} · ${today}**
 
