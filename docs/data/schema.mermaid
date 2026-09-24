@@ -113,7 +113,7 @@ erDiagram
         rich_text provider_id FK "the actor, taken from the request body and never verified"
         select entity_type "claim | artifact -- cannot name a patient, case, encounter or payer document"
         rich_text entity_id FK "polymorphic, resolved by entity_type; empty when the write it describes failed first"
-        select action "created | edited | status_changed | submitted | approved -- the last two are declared, never written"
+        select action "created | edited | status_changed | submitted | approved -- submitted is one per 837P send, any outcome; approved is declared, never written"
         rich_text detail "free text, chunked; carries the encounter and stage when entity_id is empty"
         created_time created_at "implicit page.created_time"
     }

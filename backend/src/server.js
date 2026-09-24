@@ -30,7 +30,7 @@ import {
 } from "./providerProfiles.js";
 import { DEMO_PROVIDER_PROFILE } from "../scripts/seed-provider-profile.js";
 import { recordAudit } from "./auditLog.js";
-import { transmitClaim, billedAmountOf } from "./transmitClaim.js";
+import { transmitClaim, billedAmountOf, describeTransmission } from "./transmitClaim.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.join(__dirname, "..", "..", "frontend");
@@ -160,7 +160,7 @@ async function persistArtifact(encounterId, stage, content, providerId) {
       action: "created",
       detail: `${stage} v${artifact.version} · encounter ${encounterId}`,
     });
-    return { stage, saved: true };
+    return { stage, saved: true, artifactId: artifact.artifactId };
   } catch (err) {
     console.error(`Persisting '${stage}' artifact for encounter '${encounterId}' failed:`, err);
     // The failure is logged too -- it is the first time a lost save leaves a
@@ -1038,14 +1038,25 @@ async function persistSubmittedClaim(encounterId, claim, providerId, billedAmoun
   }
 }
 
-// The one way a claim leaves Ruby: sends it and files what was sent as a
-// `submission` artifact on the encounter, whether Stedi took it or not.
+// The one way a claim leaves Ruby: sends it, files what was sent as a
+// `submission` artifact on the encounter, and logs a `submitted` entry
+// pointing at it -- whether Stedi took it or not. The status_changed entry
+// says the claim moved; this one says what went over the wire.
 function sendClaim(encounterId, stediClaim, kind, providerId) {
   return transmitClaim({
     stediClaim,
     kind,
     submit: (payload, idempotencyKey) => submitToStedi(payload, STEDI_API_KEY, idempotencyKey),
-    persist: (content) => persistArtifact(encounterId, "submission", content, providerId),
+    persist: async (content) => {
+      const saved = await persistArtifact(encounterId, "submission", content, providerId);
+      await recordAudit(repository, {
+        providerId,
+        entityType: "claim",
+        entityId: content.claimId,
+        action: "submitted",
+        detail: describeTransmission(content, saved?.artifactId),
+      });
+    },
   });
 }
 

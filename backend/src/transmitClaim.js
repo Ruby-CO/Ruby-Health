@@ -19,6 +19,16 @@ export function billedAmountOf(stediClaim) {
   return Number(stediClaim?.claimInformation?.claimChargeAmount) || 0;
 }
 
+// The audit line for one send: enough to read the trail without opening the
+// artifact, and the artifact id to open when that is not enough. A send whose
+// record failed to save says so rather than pointing nowhere.
+export function describeTransmission(record, artifactId) {
+  const what = { sent: "837P sent", rejected: "837P refused by Stedi", error: "837P send failed" }[record.outcome] || "837P";
+  const where = artifactId ? `as ${artifactId}` : "record not saved";
+  const amount = `$${Number(record.billedAmount || 0).toFixed(2)}`;
+  return `${what} · ${where} · ${amount} · ${record.kind} (frequency ${record.frequencyCode || "?"})`;
+}
+
 /**
  * Sends a mapped claim and records the transmission, then behaves exactly like
  * `submit`: resolves with Stedi's response or rethrows its error.

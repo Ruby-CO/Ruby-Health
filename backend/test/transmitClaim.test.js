@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { transmitClaim } from "../src/transmitClaim.js";
+import { transmitClaim, describeTransmission } from "../src/transmitClaim.js";
 import { StediSubmissionError } from "../src/pipeline/submitToStedi.js";
 
 const stediClaim = {
@@ -71,4 +71,18 @@ test("a payload with no claim information is still recorded rather than crashing
 
   assert.equal(records[0].claimId, "");
   assert.equal(records[0].billedAmount, 0);
+});
+
+test("the audit line says what happened, where the copy is, and for how much", () => {
+  const record = { outcome: "sent", billedAmount: 200, kind: "corrected", frequencyCode: "7" };
+  assert.equal(describeTransmission(record, "A031"), "837P sent · as A031 · $200.00 · corrected (frequency 7)");
+  assert.equal(
+    describeTransmission({ ...record, outcome: "rejected" }, "A032"),
+    "837P refused by Stedi · as A032 · $200.00 · corrected (frequency 7)"
+  );
+});
+
+test("the audit line admits a send whose copy was not saved rather than pointing nowhere", () => {
+  const record = { outcome: "error", billedAmount: 0, kind: "original", frequencyCode: "" };
+  assert.equal(describeTransmission(record, undefined), "837P send failed · record not saved · $0.00 · original (frequency ?)");
 });

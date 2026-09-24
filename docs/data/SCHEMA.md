@@ -97,8 +97,9 @@ In words:
   write that failed before it had an id, and `detail` carries the encounter
   and stage instead. Entries are written at exactly these points: claim
   created (draft, correction, appeal), claim status changed (submission, and
-  the payer's verdict from an 835), artifact created (pipeline and provider
-  edit) including a failed save. `deleteClaim`, `closeCase` and
+  the payer's verdict from an 835), claim submitted (every 837P send, sent or
+  refused, pointing at its `submission` artifact), artifact created (pipeline
+  and provider edit) including a failed save. `deleteClaim`, `closeCase` and
   `setPayerClaimControlNumber` are **not** logged yet.
 
 **Every foreign key is soft** — a plain text property holding another row's
@@ -172,7 +173,7 @@ These two are inconsistent with each other; the audit may say so.
 | `Document.source` | `upload`, `fax`, `ehr_sync` |
 | `Document.extraction_status` | `none` (only value written today) |
 | `AuditLog.entity_type` | `claim`, `artifact` |
-| `AuditLog.action` | `created`, `edited`, `status_changed`, `submitted`, `approved` (`submitted`/`approved` are declared, not yet written — submission is recorded as `status_changed`) |
+| `AuditLog.action` | `created`, `edited`, `status_changed`, `submitted`, `approved` (`submitted` is one entry per 837P send, whatever Stedi said — the status move is a separate `status_changed`; `approved` is declared, not yet written) |
 
 `Claim.status` also drives the UI: it decides whether an encounter is
 editable (anything past `draft` locks the record) and which actions a claim
