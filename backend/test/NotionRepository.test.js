@@ -336,6 +336,7 @@ test("running the pipeline against a synthetic transcript persists four versione
     facts: { chiefComplaint: "Sore throat", symptoms: ["sore throat"] },
     codes: [{ code: "J02.9", codeType: "ICD-10", description: "Acute pharyngitis" }],
     claim: { serviceLines: [{ code: "87880", diagnosisPointers: "A" }] },
+    submission: { claimId: "CL001", outcome: "sent", payload: { claimInformation: { claimChargeAmount: "100.00" } } },
   };
 
   for (const [stage, content] of Object.entries(stageOutputs)) {
@@ -343,10 +344,10 @@ test("running the pipeline against a synthetic transcript persists four versione
   }
 
   const history = await repo.getArtifactHistory(encounter.encounterId);
-  assert.equal(history.length, 4);
+  assert.equal(history.length, 5);
   assert.deepEqual(
     history.map((a) => a.stage),
-    ["transcript", "facts", "codes", "claim"],
+    ["transcript", "facts", "codes", "claim", "submission"],
   );
   for (const artifact of history) {
     assert.equal(artifact.version, 1);

@@ -164,7 +164,7 @@ These two are inconsistent with each other; the audit may say so.
 | `Patient.insurance_status` | `self_pay`, `insured`, `pending` — PHI-adjacent. Optional. A **snapshot**, not a history: a change overwrites. Eligibility (270/271) is a separate, unbuilt entity. |
 | `Case.status` | `open`, `closed` |
 | `Encounter.status` | `draft` (only value written today) |
-| `Artifact.stage` | `transcript`, `facts`, `codes`, `claim` |
+| `Artifact.stage` | `transcript`, `facts`, `codes`, `claim`, `submission` — the last is the 837P as actually sent, written only by `transmitClaim.js` |
 | `Artifact.created_by` | `system`, `provider_edit` |
 | `Claim.claim_type` | `original`, `corrected`, `secondary` |
 | `Claim.status` | `draft`, `submitted`, `accepted`, `rejected`, `denied`, `pending` |

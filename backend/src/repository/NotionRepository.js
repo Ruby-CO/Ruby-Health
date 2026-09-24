@@ -20,7 +20,9 @@ export class NotionRepositoryError extends Error {
   }
 }
 
-const STAGES = ["transcript", "facts", "codes", "claim"];
+// `submission` is the 837P as it was actually sent (see transmitClaim.js). It
+// sorts last because it is downstream of everything else on the encounter.
+const STAGES = ["transcript", "facts", "codes", "claim", "submission"];
 const CREATED_BY_VALUES = ["system", "provider_edit"];
 const CLAIM_TYPES = ["original", "corrected", "secondary"];
 const CLAIM_STATUSES = ["draft", "submitted", "accepted", "rejected", "denied", "pending"];

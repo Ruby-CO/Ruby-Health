@@ -70,7 +70,7 @@ erDiagram
     ARTIFACT {
         title artifact_id PK
         rich_text encounter_id FK
-        select stage "transcript | facts | codes | claim -- no appeal stage, no submission stage"
+        select stage "transcript | facts | codes | claim | submission -- submission is the 837P as sent; no appeal stage"
         number version "auto-incremented per (encounter_id, stage); not atomic"
         rich_text content "JSON blob, chunked at 2000 chars; ~100 chunk ceiling, unguarded. facts blob carries an undeclared medicalNecessityGrounding key; codes blob carries validation verdicts"
         select created_by "system | provider_edit -- no person behind either, and no model identity"

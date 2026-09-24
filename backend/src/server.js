@@ -30,6 +30,7 @@ import {
 } from "./providerProfiles.js";
 import { DEMO_PROVIDER_PROFILE } from "../scripts/seed-provider-profile.js";
 import { recordAudit } from "./auditLog.js";
+import { transmitClaim } from "./transmitClaim.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.join(__dirname, "..", "..", "frontend");
@@ -519,6 +520,9 @@ app.post("/api/encounters", async (req, res) => {
 // creates a brand-new encounter, and without this, whatever was already
 // extracted stayed orphaned under the auto-provisioned "unidentified
 // patient" encounter instead of following the provider's correction.
+//
+// `submission` is deliberately absent: it is the record of what went to the
+// payer, written only by sendClaim. A client must not be able to file one.
 const ENCOUNTER_ARTIFACT_STAGES = ["transcript", "facts", "codes", "claim"];
 // Who a revision came from. A provider correcting the record in History is not
 // the same as Ruby writing it, and the revision list says so -- but only if the
@@ -1021,6 +1025,17 @@ async function persistSubmittedClaim(encounterId, claim, providerId) {
   }
 }
 
+// The one way a claim leaves Ruby: sends it and files what was sent as a
+// `submission` artifact on the encounter, whether Stedi took it or not.
+function sendClaim(encounterId, stediClaim, kind, providerId) {
+  return transmitClaim({
+    stediClaim,
+    kind,
+    submit: (payload, idempotencyKey) => submitToStedi(payload, STEDI_API_KEY, idempotencyKey),
+    persist: (content) => persistArtifact(encounterId, "submission", content, providerId),
+  });
+}
+
 app.post("/api/submit-claim", async (req, res) => {
   const { claim, encounterId } = req.body || {};
 
@@ -1057,8 +1072,9 @@ app.post("/api/submit-claim", async (req, res) => {
   }
 
   try {
-    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
-    await persistSubmittedClaim(encounterId, claim, resolveProviderId(req));
+    const providerId = resolveProviderId(req);
+    const stediResponse = await sendClaim(encounterId, stediClaim, "original", providerId);
+    await persistSubmittedClaim(encounterId, claim, providerId);
     res.json({ stediClaim, stediResponse });
   } catch (err) {
     if (err instanceof StediSubmissionError) {
@@ -1165,7 +1181,7 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
       throw err;
     }
 
-    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
+    const stediResponse = await sendClaim(original.encounterId, stediClaim, "corrected", correctionProviderId);
     await repository.updateClaimStatus(correctedClaimRow.claimId, "submitted");
     await recordAudit(repository, {
       providerId: correctionProviderId,
@@ -1291,7 +1307,7 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
       throw err;
     }
 
-    const stediResponse = await submitToStedi(stediClaim, STEDI_API_KEY);
+    const stediResponse = await sendClaim(original.encounterId, stediClaim, "appeal", appealProviderId);
     await repository.updateClaimStatus(appealClaimRow.claimId, "submitted");
     await recordAudit(repository, {
       providerId: appealProviderId,
