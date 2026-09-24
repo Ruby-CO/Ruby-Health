@@ -22,6 +22,11 @@ export class NotionRepositoryError extends Error {
 
 // `submission` is the 837P as it was actually sent (see transmitClaim.js). It
 // sorts last because it is downstream of everything else on the encounter.
+//
+// A new stage must be added as an option in the Artifacts database *before* it
+// ships. Notion mints an unknown option on write, but rejects one in a query
+// filter -- and createArtifact queries by stage to number the version. That is
+// how the first live submission failed to save.
 const STAGES = ["transcript", "facts", "codes", "claim", "submission"];
 const CREATED_BY_VALUES = ["system", "provider_edit"];
 const CLAIM_TYPES = ["original", "corrected", "secondary"];
