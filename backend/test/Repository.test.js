@@ -28,6 +28,7 @@ test("every Repository method throws NotImplementedError until a subclass overri
     () => repo.deleteClaim("CL001"),
     () => repo.listClaimsForEncounter("E001"),
     () => repo.setPayerClaimControlNumber("CL001", "123"),
+    () => repo.setBilledAmount("CL001", 100),
     () => repo.createPayerFeedback({}),
     () => repo.getPayerFeedback("PF001"),
     () => repo.listPayerFeedbackForClaim("CL001"),

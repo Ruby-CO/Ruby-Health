@@ -89,6 +89,7 @@ erDiagram
         select status "draft | submitted | accepted | rejected | denied | pending"
         date submitted_at "set from the server clock on transition to submitted"
         rich_text payer_claim_control_number "payer-assigned; arrives on 277CA or 835"
+        number billed_amount "total charge on the 837P as sent; null until sent"
         rich_text provider_id FK "soft FK to the provider profile JSON file; a correction inherits the original's"
         created_time created_at "implicit page.created_time"
     }

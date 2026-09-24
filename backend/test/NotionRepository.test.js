@@ -849,6 +849,27 @@ test("a new claim has no payer control number until the payer sends one", async 
   assert.equal((await repo.getClaim(claim.claimId)).payerClaimControlNumber, "2026250012345");
 });
 
+test("a claim carries no billed amount until it is sent, then keeps the number", async () => {
+  const repo = makeRepository();
+  const { claim } = await makeSubmittedClaim(repo);
+  assert.equal(claim.billedAmount, null);
+
+  const updated = await repo.setBilledAmount(claim.claimId, 200);
+  assert.equal(updated.billedAmount, 200);
+  assert.equal((await repo.getClaim(claim.claimId)).billedAmount, 200);
+});
+
+test("setBilledAmount refuses anything that is not a non-negative number", async () => {
+  // Stedi takes the charge as a string; passing that through would put text
+  // in a column meant to be summed.
+  const repo = makeRepository();
+  const { claim } = await makeSubmittedClaim(repo);
+  for (const bad of ["200.00", -1, Number.NaN, null]) {
+    await assert.rejects(() => repo.setBilledAmount(claim.claimId, bad), NotionRepositoryError);
+  }
+  await assert.rejects(() => repo.setBilledAmount("CL999", 100), NotionRepositoryError);
+});
+
 test("setPayerClaimControlNumber rejects a claim that doesn't exist", async () => {
   const repo = makeRepository();
   await assert.rejects(() => repo.setPayerClaimControlNumber("CL999", "123"), NotionRepositoryError);

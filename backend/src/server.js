@@ -30,7 +30,7 @@ import {
 } from "./providerProfiles.js";
 import { DEMO_PROVIDER_PROFILE } from "../scripts/seed-provider-profile.js";
 import { recordAudit } from "./auditLog.js";
-import { transmitClaim } from "./transmitClaim.js";
+import { transmitClaim, billedAmountOf } from "./transmitClaim.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FRONTEND_DIR = path.join(__dirname, "..", "..", "frontend");
@@ -975,13 +975,25 @@ app.post("/api/provider-profile", (req, res) => {
 // ends with one Claim row, not two. Only creates a fresh one as a fallback,
 // for a claim submitted from an encounter old enough to predate that draft
 // row, or if drafting it failed at the time.
-async function persistSubmittedClaim(encounterId, claim, providerId) {
+// Its own best-effort write, so a failure here (say, the Notion column is
+// missing) cannot stop the status and encounter updates around it. The
+// submission artifact still holds the full payload if this is lost.
+async function recordBilledAmount(claimId, amount) {
+  try {
+    await repository.setBilledAmount(claimId, amount);
+  } catch (err) {
+    console.error(`Recording the billed amount on claim '${claimId}' failed:`, err);
+  }
+}
+
+async function persistSubmittedClaim(encounterId, claim, providerId, billedAmount) {
   if (!repository || !encounterId) return;
   try {
     const existingClaims = await repository.listClaimsForEncounter(encounterId);
     const draft = pickOriginalDraft(existingClaims);
     if (draft) {
       await repository.updateClaimStatus(draft.claimId, "submitted");
+      await recordBilledAmount(draft.claimId, billedAmount);
       await recordAudit(repository, {
         providerId,
         entityType: "claim",
@@ -1008,6 +1020,7 @@ async function persistSubmittedClaim(encounterId, claim, providerId) {
           detail: `draft from ${artifact.artifactId} (filed at submission)`,
         });
         await repository.updateClaimStatus(created.claimId, "submitted");
+        await recordBilledAmount(created.claimId, billedAmount);
         await recordAudit(repository, {
           providerId,
           entityType: "claim",
@@ -1074,7 +1087,7 @@ app.post("/api/submit-claim", async (req, res) => {
   try {
     const providerId = resolveProviderId(req);
     const stediResponse = await sendClaim(encounterId, stediClaim, "original", providerId);
-    await persistSubmittedClaim(encounterId, claim, providerId);
+    await persistSubmittedClaim(encounterId, claim, providerId, billedAmountOf(stediClaim));
     res.json({ stediClaim, stediResponse });
   } catch (err) {
     if (err instanceof StediSubmissionError) {
@@ -1183,6 +1196,7 @@ app.post("/api/claims/:claimId/resubmit", async (req, res) => {
 
     const stediResponse = await sendClaim(original.encounterId, stediClaim, "corrected", correctionProviderId);
     await repository.updateClaimStatus(correctedClaimRow.claimId, "submitted");
+    await recordBilledAmount(correctedClaimRow.claimId, billedAmountOf(stediClaim));
     await recordAudit(repository, {
       providerId: correctionProviderId,
       entityType: "claim",
@@ -1309,6 +1323,7 @@ app.post("/api/claims/:claimId/appeal/submit", async (req, res) => {
 
     const stediResponse = await sendClaim(original.encounterId, stediClaim, "appeal", appealProviderId);
     await repository.updateClaimStatus(appealClaimRow.claimId, "submitted");
+    await recordBilledAmount(appealClaimRow.claimId, billedAmountOf(stediClaim));
     await recordAudit(repository, {
       providerId: appealProviderId,
       entityType: "claim",

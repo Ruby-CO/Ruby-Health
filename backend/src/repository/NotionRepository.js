@@ -135,6 +135,10 @@ function parseClaim(page) {
     submittedAt: dateValue(page, "submitted_at"),
     // Assigned by the payer, so it is empty until a 277CA or 835 comes back.
     payerClaimControlNumber: richText(page, "payer_claim_control_number") || null,
+    // What Ruby billed, copied off the 837P when it was sent. Null until then,
+    // and on rows sent before the field existed -- their submission artifact,
+    // if any, still has the payload.
+    billedAmount: numberValue(page, "billed_amount") ?? null,
     // Soft FK to the provider profile. Null on rows that predate the field.
     providerId: richText(page, "provider_id") || null,
     createdAt: page.properties.created_at?.created_time || page.created_time || null,
@@ -637,6 +641,21 @@ export class NotionRepository extends Repository {
     const updated = await this.client.pages.update({
       page_id: page.id,
       properties: { payer_claim_control_number: { rich_text: [{ text: { content: controlNumber || "" } }] } },
+    });
+    return parseClaim(updated);
+  }
+
+  async setBilledAmount(claimId, amount) {
+    this._requireClaimsDataSource();
+    if (typeof amount !== "number" || !Number.isFinite(amount) || amount < 0) {
+      throw new NotionRepositoryError("setBilledAmount requires a non-negative number.");
+    }
+    const page = await this._findByTitle(this.claimsDataSourceId, "claim_id", claimId);
+    if (!page) throw new NotionRepositoryError(`No claim found with claim_id '${claimId}'.`);
+
+    const updated = await this.client.pages.update({
+      page_id: page.id,
+      properties: { billed_amount: { number: amount } },
     });
     return parseClaim(updated);
   }

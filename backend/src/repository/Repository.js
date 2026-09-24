@@ -181,6 +181,13 @@ export class Repository {
     throw new NotImplementedError("setPayerClaimControlNumber");
   }
 
+  /** Records the total charge Ruby put on the claim when it was sent, so
+   *  billed dollars can be summed without opening each submission artifact.
+   *  @returns {Promise<object>} the Claim, with billedAmount set */
+  async setBilledAmount(_claimId, _amount) {
+    throw new NotImplementedError("setBilledAmount");
+  }
+
   // --- PayerFeedback (what came back after the claim was submitted) --------
 
   /** @param {{ claimId: string, feedbackType: string, receivedAt: string,

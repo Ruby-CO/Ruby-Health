@@ -14,6 +14,11 @@ import { StediSubmissionError } from "./pipeline/submitToStedi.js";
 // took it -- not that the payer has accepted anything; that arrives later.
 export const TRANSMISSION_OUTCOMES = ["sent", "rejected", "error"];
 
+// The total the 837P bills, as a number. Stedi takes it as a string.
+export function billedAmountOf(stediClaim) {
+  return Number(stediClaim?.claimInformation?.claimChargeAmount) || 0;
+}
+
 /**
  * Sends a mapped claim and records the transmission, then behaves exactly like
  * `submit`: resolves with Stedi's response or rethrows its error.
@@ -37,7 +42,7 @@ export async function transmitClaim({ stediClaim, kind, submit, persist, now = (
     claimId: claimInformation.patientControlNumber || "",
     kind,
     frequencyCode: claimInformation.claimFrequencyCode || "",
-    billedAmount: Number(claimInformation.claimChargeAmount) || 0,
+    billedAmount: billedAmountOf(stediClaim),
     sentAt: now().toISOString(),
     idempotencyKey,
     payload: stediClaim,
